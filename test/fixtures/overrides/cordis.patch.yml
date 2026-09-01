@@ -1,0 +1,4 @@
+# 测试 patch 片段
+profiles:
+  test-preview-pack:
+    description: 测试预览整合包

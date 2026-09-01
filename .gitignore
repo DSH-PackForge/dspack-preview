@@ -5,6 +5,9 @@ obj/
 *.suo
 .vs/
 
+# 测试产物（由 test/make-test-pack.ps1 生成）
+*.dspack
+
 # OS
 Thumbs.db
 Desktop.ini

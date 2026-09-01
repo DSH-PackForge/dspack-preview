@@ -1,18 +1,19 @@
 using System;
 using System.Runtime.InteropServices;
-using System.Runtime.InteropServices.ComTypes;
 using Microsoft.Win32;
 
 namespace DspackPreview
 {
     /// <summary>
-    /// .dspack 预览处理器：实现 IPreviewHandler + 初始化接口，由资源管理器宿主（prevhost.exe）加载。
+    /// .dspack 预览处理器：实现 IPreviewHandler + IInitializeWithFile，由资源管理器宿主（prevhost.exe）加载。
+    /// 只实现 IInitializeWithFile（本地文件）；Explorer 优先走 IInitializeWithStream 时 QueryInterface 会失败并回退。
+    /// 调试：所有入口写日志到 %TEMP%\dspack-preview.log。
     /// </summary>
     [ComVisible(true)]
     [ClassInterface(ClassInterfaceType.None)]
     [Guid("7f3c5a1e-2b4d-4e6a-9c8b-1d5f7a3e9c2d")]
     [ProgId("DspackPreview.PreviewHandler")]
-    public sealed class DspackPreviewHandler : IPreviewHandler, IInitializeWithFile, IInitializeWithStream, IObjectWithSite
+    public sealed class DspackPreviewHandler : IPreviewHandler, IInitializeWithFile, IObjectWithSite
     {
         private const string HandlerClsid = "{7f3c5a1e-2b4d-4e6a-9c8b-1d5f7a3e9c2d}";
         private const string PreviewHandlerCategory = "{8895b1c6-b41f-4c1c-a562-0d564250836f}";
@@ -23,22 +24,31 @@ namespace DspackPreview
         private RECT _rect;
         private PreviewForm _form;
 
-        #region IInitializeWithFile
-        public void Initialize(string pszFilePath, uint grfMode) => _filePath = pszFilePath;
-        #endregion
-
-        #region IInitializeWithStream
-        public void Initialize(IStream pstream, uint grfMode)
+        public DspackPreviewHandler()
         {
-            // 骨架：流式初始化暂不支持，抛 E_ACCESSDENIED 让宿主回退到 IInitializeWithFile。
-            // TODO：从 IStream 读入内存/临时文件再解析。
-            Marshal.ThrowExceptionForHR(unchecked((int)0x80070005));
+            Log.Write("ctor");
+        }
+
+        #region IInitializeWithFile
+        public void Initialize(string pszFilePath, uint grfMode)
+        {
+            _filePath = pszFilePath;
+            Log.Write("Initialize(file) path=" + pszFilePath);
         }
         #endregion
 
         #region IObjectWithSite
-        public void SetSite(object pUnkSite) => _site = pUnkSite;
-        public void GetSite(ref Guid riid, out object ppvSite) => ppvSite = _site;
+        public void SetSite(object pUnkSite)
+        {
+            _site = pUnkSite;
+            Log.Write("SetSite");
+        }
+
+        public void GetSite(ref Guid riid, out object ppvSite)
+        {
+            ppvSite = _site;
+            Log.Write("GetSite");
+        }
         #endregion
 
         #region IPreviewHandler
@@ -46,47 +56,73 @@ namespace DspackPreview
         {
             _parentHwnd = hwnd;
             _rect = prc;
+            Log.Write("SetWindow hwnd=0x" + hwnd.ToString("X") + " rect=" + prc.Left + "," + prc.Top + " " + prc.Right + "," + prc.Bottom);
         }
 
-        public void SetRect(ref RECT prc) => _rect = prc;
+        public void SetRect(ref RECT prc)
+        {
+            _rect = prc;
+            Log.Write("SetRect rect=" + prc.Left + "," + prc.Top + " " + prc.Right + "," + prc.Bottom);
+        }
 
         public void DoPreview()
         {
-            if (_form == null)
+            Log.Write("DoPreview enter, file=" + _filePath);
+            try
             {
-                ManifestInfo info;
-                try { info = ManifestReader.Read(_filePath); }
-                catch (Exception ex)
+                if (_form == null)
                 {
-                    info = new ManifestInfo { DisplayName = "预览失败", Description = ex.Message };
+                    ManifestInfo info;
+                    try { info = ManifestReader.Read(_filePath); }
+                    catch (Exception ex)
+                    {
+                        Log.Write("ManifestReader failed: " + ex);
+                        info = new ManifestInfo { DisplayName = "预览失败", Description = ex.Message };
+                    }
+                    Log.Write("manifest name=" + info.Name + " version=" + info.Version);
+
+                    _form = new PreviewForm(info)
+                    {
+                        TopLevel = false,
+                        FormBorderStyle = System.Windows.Forms.FormBorderStyle.None,
+                        ShowInTaskbar = false
+                    };
+                    _form.CreateControl();
+                    Log.Write("preview form handle=0x" + _form.Handle.ToString("X"));
                 }
 
-                _form = new PreviewForm(info)
-                {
-                    TopLevel = false,
-                    BorderStyle = System.Windows.Forms.FormBorderStyle.None,
-                    ShowInTaskbar = false
-                };
-                _form.CreateControl();
+                Native.SetParent(_form.Handle, _parentHwnd);
+                Native.SetWindowLong(_form.Handle, Native.GWL_STYLE, Native.GetWindowLong(_form.Handle, Native.GWL_STYLE) | Native.WS_CHILD);
+                Native.MoveWindow(_form.Handle, _rect.Left, _rect.Top, Math.Max(1, _rect.Right - _rect.Left), Math.Max(1, _rect.Bottom - _rect.Top), true);
+                _form.Show();
+                Log.Write("DoPreview ok");
             }
-
-            Native.SetParent(_form.Handle, _parentHwnd);
-            Native.SetWindowLong(_form.Handle, Native.GWL_STYLE, Native.GetWindowLong(_form.Handle, Native.GWL_STYLE) | Native.WS_CHILD);
-            Native.MoveWindow(_form.Handle, _rect.Left, _rect.Top, Math.Max(1, _rect.Right - _rect.Left), Math.Max(1, _rect.Bottom - _rect.Top), true);
-            _form.Show();
+            catch (Exception ex)
+            {
+                Log.Write("DoPreview EXCEPTION: " + ex);
+            }
         }
 
         public void Unload()
         {
+            Log.Write("Unload");
             if (_form == null) return;
             _form.Hide();
             _form.Dispose();
             _form = null;
         }
 
-        public void SetFocus() => _form?.Focus();
+        public void SetFocus()
+        {
+            Log.Write("SetFocus");
+            _form?.Focus();
+        }
 
-        public void QueryFocus(out IntPtr phwnd) => phwnd = _form != null ? _form.Handle : IntPtr.Zero;
+        public void QueryFocus(out IntPtr phwnd)
+        {
+            phwnd = _form != null ? _form.Handle : IntPtr.Zero;
+            Log.Write("QueryFocus hwnd=0x" + phwnd.ToString("X"));
+        }
 
         public void TranslateAccelerator(ref MSG pmsg)
         {
@@ -98,10 +134,11 @@ namespace DspackPreview
         [ComRegisterFunction]
         public static void Register(Type t)
         {
-            using (var key = Registry.CurrentUser.CreateSubKey($@"Software\Classes\.dspack\shellex\{PreviewHandlerCategory}"))
+            // 机器级（HKLM\Software\Classes）：预览处理器由 Explorer 的 prevhost.exe 加载，每用户注册不会被采信。
+            using (var key = Registry.ClassesRoot.CreateSubKey($@".dspack\shellex\{PreviewHandlerCategory}"))
                 key.SetValue(null, HandlerClsid);
 
-            using (var key = Registry.CurrentUser.CreateSubKey($@"Software\Classes\CLSID\{HandlerClsid}\InprocServer32"))
+            using (var key = Registry.ClassesRoot.CreateSubKey($@"CLSID\{HandlerClsid}\InprocServer32"))
             {
                 key.SetValue(null, "mscoree.dll");
                 key.SetValue("ThreadingModel", "Both");
@@ -115,10 +152,34 @@ namespace DspackPreview
         [ComUnregisterFunction]
         public static void Unregister(Type t)
         {
-            Registry.CurrentUser.DeleteSubKeyTree($@"Software\Classes\.dspack\shellex\{PreviewHandlerCategory}", false);
-            Registry.CurrentUser.DeleteSubKeyTree($@"Software\Classes\CLSID\{HandlerClsid}", false);
+            Registry.ClassesRoot.DeleteSubKeyTree($@".dspack\shellex\{PreviewHandlerCategory}", false);
+            Registry.ClassesRoot.DeleteSubKeyTree($@"CLSID\{HandlerClsid}", false);
         }
         #endregion
+    }
+
+    /// <summary>简单文件日志，写入 %TEMP%\dspack-preview.log，任何失败静默忽略。</summary>
+    internal static class Log
+    {
+        private static readonly object Sync = new object();
+        private static readonly string File = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "dspack-preview.log");
+
+        public static void Write(string message)
+        {
+            try
+            {
+                lock (Sync)
+                {
+                    var p = System.Diagnostics.Process.GetCurrentProcess();
+                    System.IO.File.AppendAllText(File,
+                        DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") +
+                        " [" + p.ProcessName + ":" + p.Id + "] " + message + Environment.NewLine);
+                }
+            }
+            catch
+            {
+            }
+        }
     }
 
     internal static class Native

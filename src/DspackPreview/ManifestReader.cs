@@ -38,9 +38,9 @@ namespace DspackPreview
                 info.DisplayName = PickLang(root, "displayName");
                 info.Description = PickLang(root, "description");
 
-                if (root.TryGetValue("bundles", out var b) && b is object[] ba) info.Bundles = ba.Length;
-                if (root.TryGetValue("dependencies", out var d) && d is Dictionary<string, object> dd) info.Dependencies = dd.Count;
-                if (root.TryGetValue("files", out var f) && f is object[] fa) info.Files = fa.Length;
+                info.Bundles      = GetCount(root, "bundles");
+                info.Dependencies = GetCount(root, "dependencies");
+                info.Files        = GetCount(root, "files");
             }
             catch
             {
@@ -52,6 +52,12 @@ namespace DspackPreview
         private static string GetString(Dictionary<string, object> root, string key)
         {
             return root.TryGetValue(key, out var v) ? v as string : null;
+        }
+
+        /// <summary>JavaScriptSerializer 把 JSON 数组反序列化为 ArrayList、对象为 Dictionary，统一按 ICollection 取 Count。</summary>
+        private static int GetCount(Dictionary<string, object> root, string key)
+        {
+            return root.TryGetValue(key, out var v) && v is System.Collections.ICollection c ? c.Count : 0;
         }
 
         /// <summary>displayName/description 可能是字符串，也可能是多语言 map；优先 en-US → zh-CN → 首个值。</summary>
