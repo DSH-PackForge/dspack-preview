@@ -5,6 +5,18 @@ obj/
 *.suo
 .vs/
 
+# C++ 构建产物
+*.obj
+*.lib
+*.exp
+*.pdb
+*.ilk
+*.idb
+*.dll
+
+# 测试截图
+render-capture.*
+
 # 测试产物（由 test/make-test-pack.ps1 生成）
 *.dspack
 *.exe
