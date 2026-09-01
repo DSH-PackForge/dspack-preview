@@ -186,11 +186,32 @@ void CardText(HDC hdc, RECT* rc, const std::wstring& s, HFONT f, COLORREF c, UIN
     SelectObject(hdc, old);
 }
 
+static int LineHeight(HDC hdc, HFONT f)
+{
+    TEXTMETRICW tm;
+    HFONT old = (HFONT)SelectObject(hdc, f);
+    GetTextMetricsW(hdc, &tm);
+    SelectObject(hdc, old);
+    return tm.tmHeight;
+}
+
+static int MeasureHeight(HDC hdc, const std::wstring& s, HFONT f, int widthPx, UINT extra)
+{
+    RECT r = { 0, 0, widthPx, 0 };
+    HFONT old = (HFONT)SelectObject(hdc, f);
+    DrawTextW(hdc, s.c_str(), (int)s.size(), &r, extra | DT_CALCRECT | DT_NOPREFIX);
+    SelectObject(hdc, old);
+    return r.bottom;
+}
+
 void RenderPreview(HDC hdc, const RECT& rc, const PreviewData& d)
 {
     const Palette P;
     int W = rc.right - rc.left;
-    int bottom = rc.bottom;
+    int dpi = GetDeviceCaps(hdc, LOGPIXELSY);
+    double sc = (double)dpi / 96.0;
+    int pad = (int)(18 * sc + 0.5);
+    int gap = (int)(10 * sc + 0.5);
 
     // background
     HBRUSH bg = CreateSolidBrush(P.bg);
@@ -198,53 +219,66 @@ void RenderPreview(HDC hdc, const RECT& rc, const PreviewData& d)
     DeleteObject(bg);
 
     HFONT fTitle = MakeFont(hdc, 20, FW_SEMIBOLD);
-    HFONT fHeadSub = MakeFont(hdc, 11, FW_NORMAL);
-    HFONT fNum = MakeFont(hdc, 16, FW_BOLD);
-    HFONT fChipLbl = MakeFont(hdc, 10, FW_NORMAL);
+    HFONT fSub = MakeFont(hdc, 11, FW_NORMAL);
+    HFONT fNum = MakeFont(hdc, 15, FW_BOLD);
+    HFONT fChip = MakeFont(hdc, 10, FW_NORMAL);
     HFONT fBody = MakeFont(hdc, 11, FW_NORMAL);
-    HFONT fLbl = MakeFont(hdc, 10, FW_SEMIBOLD);
+    HFONT fLbl = MakeFont(hdc, 11, FW_SEMIBOLD);
 
-    const int pad = 18;
+    int y = rc.top;
 
     if (!d.valid)
     {
-        // error card
-        RECT hd = rc; hd.bottom = rc.top + 88;
+        std::wstring hint = L"该文件可能不是有效的 DSHPack 整合包。\n要求:标准 ZIP,根目录含 manifest.json。";
+        int titleH = MeasureHeight(hdc, L"无法预览", fTitle, W - 2 * pad, DT_SINGLELINE);
+        int errH = MeasureHeight(hdc, d.error, fSub, W - 2 * pad, DT_SINGLELINE | DT_END_ELLIPSIS);
+        int hdH = pad + titleH + gap + errH + pad;
+
+        RECT hd = { rc.left, rc.top, rc.right, rc.top + hdH };
         HBRUSH acc = CreateSolidBrush(RGB(172, 60, 60));
         FillRect(hdc, &hd, acc); DeleteObject(acc);
-        RECT htr = { hd.left + pad, hd.top + 16, hd.right - pad, hd.top + 46 };
-        CardText(hdc, &htr, L"无法预览", fTitle, RGB(255,255,255));
-        RECT hsr = { hd.left + pad, hd.top + 48, hd.right - pad, hd.bottom - 8 };
-        CardText(hdc, &hsr, d.error, fHeadSub, RGB(255, 235, 235));
-        RECT br = { rc.left + pad, hd.bottom + 16, rc.right - pad, bottom - pad };
-        std::wstring hint = L"该文件可能不是有效的 DSHPack 整合包。\n要求:标准 ZIP,根目录含 manifest.json。";
+
+        RECT tr = { hd.left + pad, hd.top + pad, hd.right - pad, hd.top + pad + titleH };
+        CardText(hdc, &tr, L"无法预览", fTitle, RGB(255,255,255), DT_SINGLELINE);
+        RECT er = { hd.left + pad, tr.bottom + gap, hd.right - pad, tr.bottom + gap + errH };
+        CardText(hdc, &er, d.error, fSub, RGB(255,235,235), DT_SINGLELINE | DT_END_ELLIPSIS);
+
+        RECT br = { rc.left + pad, hd.bottom + gap, rc.right - pad, rc.bottom - pad };
         CardText(hdc, &br, hint, fBody, P.sub, DT_WORDBREAK);
         goto done;
     }
 
     {
         const ManifestInfo& m = d.info;
-        // header band
-        RECT hd = rc; hd.bottom = rc.top + 92;
-        HBRUSH acc = CreateSolidBrush(P.accent);
-        FillRect(hdc, &hd, acc); DeleteObject(acc);
 
+        // header band (accent) — sized by measured text, DPI-adaptive
         std::wstring title = m.displayName.empty() ? m.name : m.displayName;
-        RECT tr = { hd.left + pad, hd.top + 14, hd.right - pad, hd.top + 48 };
-        CardText(hdc, &tr, title, fTitle, RGB(255, 255, 255), DT_END_ELLIPSIS | DT_SINGLELINE);
-
-        // subtitle: version · type
         std::wstring sub = L"v" + m.version;
         std::wstring type = m.type.empty() ? L"profile" : m.type;
         sub += L"  ·  " + type;
         if (!m.dshVersion.empty()) sub += L"  ·  DSH " + m.dshVersion;
-        RECT sr = { hd.left + pad, hd.top + 50, hd.right - pad, hd.top + 74 };
-        CardText(hdc, &sr, sub, fHeadSub, RGB(226, 229, 246), DT_END_ELLIPSIS | DT_SINGLELINE);
 
-        // stats chips
-        int cy = hd.bottom + 16;
-        int chipH = 52;
-        int chipW = (W - pad * 2 - 12 * 2) / 3;
+        int titleH = MeasureHeight(hdc, title, fTitle, W - 2 * pad, DT_SINGLELINE);
+        int subH = MeasureHeight(hdc, sub, fSub, W - 2 * pad, DT_SINGLELINE);
+        int hdH = pad + titleH + gap + subH + pad;
+
+        RECT hd = { rc.left, rc.top, rc.right, rc.top + hdH };
+        HBRUSH acc = CreateSolidBrush(P.accent);
+        FillRect(hdc, &hd, acc); DeleteObject(acc);
+
+        RECT tr = { hd.left + pad, hd.top + pad, hd.right - pad, hd.top + pad + titleH };
+        CardText(hdc, &tr, title, fTitle, RGB(255,255,255), DT_SINGLELINE | DT_END_ELLIPSIS);
+        RECT srt = { hd.left + pad, tr.bottom + gap, hd.right - pad, tr.bottom + gap + subH };
+        CardText(hdc, &srt, sub, fSub, RGB(226,229,246), DT_SINGLELINE | DT_END_ELLIPSIS);
+
+        y = hd.bottom + gap;
+
+        // stats chips — height from font metrics
+        int numH = LineHeight(hdc, fNum);
+        int chipLblH = LineHeight(hdc, fChip);
+        int chipH = (int)(6 * sc) + numH + (int)(4 * sc) + chipLblH + (int)(6 * sc);
+        int cgap = (int)(12 * sc);
+        int chipW = (W - pad * 2 - cgap * 2) / 3;
         struct Chip { std::wstring num; std::wstring lbl; };
         Chip chips[3] = {
             { std::to_wstring(m.bundles), L"整合包" },
@@ -253,41 +287,53 @@ void RenderPreview(HDC hdc, const RECT& rc, const PreviewData& d)
         };
         for (int i = 0; i < 3; ++i)
         {
-            RECT cr = { rc.left + pad + i * (chipW + 12), cy, rc.left + pad + i * (chipW + 12) + chipW, cy + chipH };
+            RECT cr = { rc.left + pad + i * (chipW + cgap), y, rc.left + pad + i * (chipW + cgap) + chipW, y + chipH };
             HBRUSH cb = CreateSolidBrush(P.chip);
             FillRect(hdc, &cr, cb); DeleteObject(cb);
-            RECT nr = { cr.left + 8, cr.top + 6, cr.right - 8, cr.top + 26 };
-            CardText(hdc, &nr, chips[i].num, fNum, P.chipNum);
-            RECT lr = { cr.left + 8, cr.top + 28, cr.right - 8, cr.bottom - 6 };
-            CardText(hdc, &lr, chips[i].lbl, fChipLbl, P.sub);
+            RECT nr = { cr.left + 8, cr.top + (int)(6 * sc), cr.right - 8, cr.top + (int)(6 * sc) + numH };
+            CardText(hdc, &nr, chips[i].num, fNum, P.chipNum, DT_SINGLELINE);
+            RECT lr = { cr.left + 8, nr.bottom + (int)(4 * sc), cr.right - 8, nr.bottom + (int)(4 * sc) + chipLblH };
+            CardText(hdc, &lr, chips[i].lbl, fChip, P.sub, DT_SINGLELINE);
         }
+        y += chipH + gap;
 
-        // description block
-        int dy = cy + chipH + 14;
+        // description block — measured, capped at 4 lines
         if (!m.description.empty())
         {
-            RECT dr = { rc.left + pad, dy, rc.right - pad, dy + 90 };
+            int lh = LineHeight(hdc, fBody);
+            int dw = W - 2 * pad;
+            int fullH = MeasureHeight(hdc, m.description, fBody, dw, DT_WORDBREAK);
+            int maxH = lh * 4;
+            int showH = fullH < maxH ? fullH : maxH;
+            RECT dr = { rc.left + pad, y, rc.right - pad, y + showH };
             CardText(hdc, &dr, m.description, fBody, P.sub, DT_WORDBREAK | DT_END_ELLIPSIS);
-            // measure wrapped height for the next section
-            RECT mr = dr;
-            CardText(hdc, &mr, m.description, fBody, P.sub, DT_WORDBREAK | DT_CALCRECT);
-            dy = mr.bottom + 14;
+            y = dr.bottom + gap;
         }
 
-        // metadata lines
-        RECT lr = { rc.left + pad, dy, rc.left + pad + 90, bottom - pad };
-        RECT vr = { rc.left + pad + 92, dy, rc.right - pad, bottom - pad };
-        std::wstring labels = L"名称:\n作者:\nDSH 版本:";
-        std::wstring values = m.name + L"\n" + (m.author.empty() ? L"——" : m.author) + L"\n" + (m.dshVersion.empty() ? L"——" : m.dshVersion);
-        CardText(hdc, &lr, labels, fLbl, P.text);
-        CardText(hdc, &vr, values, fBody, P.sub, DT_END_ELLIPSIS);
+        // metadata rows — label/value aligned on the same baseline/line height
+        int lh = LineHeight(hdc, fBody);
+        int lblW = (int)(84 * sc + 0.5);
+        struct Row { const wchar_t* k; std::wstring v; };
+        Row rows[3] = {
+            { L"名称", m.name },
+            { L"作者", m.author.empty() ? L"——" : m.author },
+            { L"DSH 版本", m.dshVersion.empty() ? L"——" : m.dshVersion },
+        };
+        for (int i = 0; i < 3; ++i)
+        {
+            RECT lr = { rc.left + pad, y, rc.left + pad + lblW, y + lh };
+            CardText(hdc, &lr, rows[i].k, fLbl, P.text, DT_SINGLELINE | DT_END_ELLIPSIS);
+            RECT vr = { lr.right + (int)(12 * sc), y, rc.right - pad, y + lh };
+            CardText(hdc, &vr, rows[i].v, fBody, P.sub, DT_SINGLELINE | DT_END_ELLIPSIS);
+            y += lh + (int)(6 * sc);
+        }
     }
 
 done:
     DeleteObject(fTitle);
-    DeleteObject(fHeadSub);
+    DeleteObject(fSub);
     DeleteObject(fNum);
-    DeleteObject(fChipLbl);
+    DeleteObject(fChip);
     DeleteObject(fBody);
     DeleteObject(fLbl);
 }
@@ -520,6 +566,16 @@ static HRESULT SetRegValue(HKEY root, const wchar_t* sub, const wchar_t* name, c
     return HRESULT_FROM_WIN32(lr);
 }
 
+static HRESULT SetRegDword(HKEY root, const wchar_t* sub, const wchar_t* name, DWORD val)
+{
+    HKEY k = 0;
+    LONG lr = RegCreateKeyExW(root, sub, 0, 0, 0, KEY_WRITE, 0, &k, 0);
+    if (lr != ERROR_SUCCESS) return HRESULT_FROM_WIN32(lr);
+    lr = RegSetValueExW(k, name, 0, REG_DWORD, (const BYTE*)&val, sizeof(val));
+    RegCloseKey(k);
+    return HRESULT_FROM_WIN32(lr);
+}
+
 extern "C" HRESULT __stdcall DllRegisterServer()
 {
     wchar_t dll[MAX_PATH];
@@ -529,9 +585,13 @@ extern "C" HRESULT __stdcall DllRegisterServer()
 
     swprintf_s(sub, L"CLSID\\%s", clsid);
     SetRegValue(HKEY_CLASSES_ROOT, sub, 0, kProgId);
+    // ★ 托管到 prevhost.exe 代理(决定性:缺 AppID 则不进 prevhost,预览报"无法预览")
+    SetRegValue(HKEY_CLASSES_ROOT, sub, L"AppID", L"{6d2b5079-2f0b-48dd-ab7f-97cec514d30b}");
+    // 允许预览未受信任文件(与系统预览器一致)
+    SetRegDword(HKEY_CLASSES_ROOT, sub, L"AutomaticallyPreviewUntrustedFiles", 1);
     swprintf_s(sub, L"CLSID\\%s\\InprocServer32", clsid);
     SetRegValue(HKEY_CLASSES_ROOT, sub, 0, dll);
-    SetRegValue(HKEY_CLASSES_ROOT, sub, L"ThreadingModel", L"Both");
+    SetRegValue(HKEY_CLASSES_ROOT, sub, L"ThreadingModel", L"Apartment");
     swprintf_s(sub, L".dspack\\shellex\\%s", kPreviewCat);
     SetRegValue(HKEY_CLASSES_ROOT, sub, 0, clsid);
     swprintf_s(sub, L"%s\\CLSID", kProgId);
