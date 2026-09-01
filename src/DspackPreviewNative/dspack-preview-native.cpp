@@ -69,23 +69,13 @@ struct PreviewData
     std::wstring error;
 };
 
-void LoadAndParse(const wchar_t* path, PreviewData& d)
+void LoadAndParseBuf(const BYTE* data, size_t size, PreviewData& d)
 {
-    HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
-        0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
-    if (h == INVALID_HANDLE_VALUE) { d.valid = false; d.error = L"无法打开文件"; return; }
-    DWORD size = GetFileSize(h, 0);
-    if (size < 8 || size > (64u << 20)) { CloseHandle(h); d.valid = false; d.error = L"文件大小异常"; return; }
-    std::vector<BYTE> buf(size);
-    DWORD rd = 0;
-    BOOL ok = ReadFile(h, buf.data(), size, &rd, 0) != 0;
-    CloseHandle(h);
-    if (!ok || rd != size) { d.valid = false; d.error = L"读取文件失败"; return; }
-    if (memcmp(buf.data(), "DSPK", 4) != 0) { d.valid = false; d.error = L"不是有效的 .dspack 文件"; return; }
-    d.headerVersion = (uint32_t)buf[4] | ((uint32_t)buf[5] << 8) | ((uint32_t)buf[6] << 16) | ((uint32_t)buf[7] << 24);
+    if (size < 8 || memcmp(data, "DSPK", 4) != 0) { d.valid = false; d.error = L"不是有效的 .dspack 文件"; return; }
+    d.headerVersion = (uint32_t)data[4] | ((uint32_t)data[5] << 8) | ((uint32_t)data[6] << 16) | ((uint32_t)data[7] << 24);
 
     std::vector<BYTE> entry;
-    if (!ReadZipEntry(buf.data() + 8, rd - 8, "manifest.json", entry))
+    if (!ReadZipEntry(data + 8, size - 8, "manifest.json", entry))
     {
         d.valid = false;
         d.error = L"压缩包中缺少 manifest.json";
@@ -98,6 +88,37 @@ void LoadAndParse(const wchar_t* path, PreviewData& d)
         return;
     }
     d.valid = true;
+}
+
+void LoadAndParse(const wchar_t* path, PreviewData& d)
+{
+    HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+        0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+    if (h == INVALID_HANDLE_VALUE) { d.valid = false; d.error = L"无法打开文件"; return; }
+    DWORD size = GetFileSize(h, 0);
+    if (size < 8 || size > (64u << 20)) { CloseHandle(h); d.valid = false; d.error = L"文件大小异常"; return; }
+    std::vector<BYTE> buf(size);
+    DWORD rd = 0;
+    BOOL ok = ReadFile(h, buf.data(), size, &rd, 0) != 0;
+    CloseHandle(h);
+    if (!ok || rd != size) { d.valid = false; d.error = L"读取文件失败"; return; }
+    LoadAndParseBuf(buf.data(), rd, d);
+}
+
+bool ReadStreamToVec(IStream* s, std::vector<BYTE>& out)
+{
+    if (!s) return false;
+    LARGE_INTEGER li = { 0 };
+    s->Seek(li, STREAM_SEEK_SET, NULL);
+    STATSTG st; ZeroMemory(&st, sizeof(st));
+    if (FAILED(s->Stat(&st, STATFLAG_NONAME))) return false;
+    ULONGLONG sz = st.cbSize.QuadPart;
+    if (sz > (64ull << 20)) sz = (64ull << 20); // cap at 64MB
+    out.resize((size_t)sz);
+    ULONG got = 0;
+    if (FAILED(s->Read(out.data(), (ULONG)out.size(), &got))) { out.clear(); return false; }
+    out.resize(got);
+    return !out.empty();
 }
 
 // ---------- GDI rendering ----------
@@ -281,10 +302,11 @@ bool EnsureHostClass()
 }
 } // namespace
 
-class CDspackPreviewHandler : public IPreviewHandler, public IInitializeWithFile
+class CDspackPreviewHandler : public IPreviewHandler, public IInitializeWithFile, public IInitializeWithStream
 {
     volatile LONG m_ref;
     wchar_t* m_file;
+    std::vector<BYTE> m_streamBuf;
     HWND m_hwnd;
     HWND m_host;
     RECT m_rect;
@@ -310,6 +332,8 @@ public:
             *ppv = static_cast<IPreviewHandler*>(this);
         else if (IsEqualGUID(riid, IID_IInitializeWithFile))
             *ppv = static_cast<IInitializeWithFile*>(this);
+        else if (IsEqualGUID(riid, IID_IInitializeWithStream))
+            *ppv = static_cast<IInitializeWithStream*>(this);
         else
             return E_NOINTERFACE;
         AddRef();
@@ -331,6 +355,15 @@ public:
         m_file = (wchar_t*)CoTaskMemAlloc((wcslen(pszFilePath) + 1) * sizeof(wchar_t));
         if (!m_file) return E_OUTOFMEMORY;
         wcscpy(m_file, pszFilePath);
+        return S_OK;
+    }
+
+    // IInitializeWithStream
+    STDMETHODIMP Initialize(IStream* pstream, DWORD grfMode)
+    {
+        Log("Initialize(stream)");
+        m_streamBuf.clear();
+        if (pstream) ReadStreamToVec(pstream, m_streamBuf);
         return S_OK;
     }
 
@@ -357,7 +390,8 @@ public:
 
         PreviewData* d = new (std::nothrow) PreviewData();
         if (!d) return E_OUTOFMEMORY;
-        if (m_file) LoadAndParse(m_file, *d);
+        if (!m_streamBuf.empty()) LoadAndParseBuf(m_streamBuf.data(), m_streamBuf.size(), *d);
+        else if (m_file) LoadAndParse(m_file, *d);
         else { d->valid = false; d->error = L"没有文件路径"; }
 
         if (!EnsureHostClass()) { delete d; return E_FAIL; }

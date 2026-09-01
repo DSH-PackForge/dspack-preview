@@ -52,6 +52,10 @@ parse-smoke.exe test\test-preview-1.0.0.dspack
 :: 运行时渲染冒烟：CoCreateInstance → DoPreview → 强制 WM_PRINT 渲染
 cl /nologo /O2 /MT /EHsc test\render-test.cpp /link /OUT:render-test.exe ole32.lib user32.lib uuid.lib gdi32.lib
 render-test.exe test\test-preview-1.0.0.dspack
+
+:: 流式初始化冒烟（IInitializeWithStream 通道）：
+cl /nologo /O2 /MT /EHsc /DUNICODE /D_UNICODE test\stream-test.cpp /link /OUT:stream-test.exe ole32.lib shlwapi.lib user32.lib gdi32.lib uuid.lib
+stream-test.exe src\DspackPreviewNative\DspackPreviewNative.dll test\test-preview-1.0.0.dspack
 ```
 
 ## 注册 / 卸载
@@ -83,6 +87,7 @@ test/
 ├── fixtures/                    # manifest.json / package.json / overrides/
 ├── parse-smoke.cpp              # 解析冒烟测试（原生 C++）
 ├── render-test.cpp              # 运行时渲染冒烟测试（原生 C++）
+├── stream-test.cpp              # 流式初始化（IInitializeWithStream）冒烟测试
 ├── smoke-test.cs                # C# 版冒烟（参考）
 ├── register-test.ps1 / com-test.vbs  # COM 创建校验
 ```
