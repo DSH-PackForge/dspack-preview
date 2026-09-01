@@ -536,6 +536,15 @@ extern "C" HRESULT __stdcall DllRegisterServer()
     SetRegValue(HKEY_CLASSES_ROOT, sub, 0, clsid);
     swprintf_s(sub, L"%s\\CLSID", kProgId);
     SetRegValue(HKEY_CLASSES_ROOT, sub, 0, clsid);
+
+    // .dspack 文件类型 → ProgId(让 shell 识别该扩展为已注册类型)
+    SetRegValue(HKEY_CLASSES_ROOT, L".dspack", 0, kProgId);
+    // ProgId 下也挂预览处理器(部分 shell 从 ProgId 而非扩展名查找 shellex)
+    swprintf_s(sub, L"%s\\shellex\\%s", kProgId, kPreviewCat);
+    SetRegValue(HKEY_CLASSES_ROOT, sub, 0, clsid);
+    // 登记到系统预览处理器清单(shell 据此确认可托管的处理器)
+    swprintf_s(sub, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\PreviewHandlers");
+    SetRegValue(HKEY_LOCAL_MACHINE, sub, clsid, L"DSH-PackForge .dspack Preview Handler");
     return S_OK;
 }
 
@@ -549,9 +558,18 @@ extern "C" HRESULT __stdcall DllUnregisterServer()
     RegDeleteKeyW(HKEY_CLASSES_ROOT, sub);
     swprintf_s(sub, L".dspack\\shellex\\%s", kPreviewCat);
     RegDeleteKeyW(HKEY_CLASSES_ROOT, sub);
+    swprintf_s(sub, L"%s\\shellex\\%s", kProgId, kPreviewCat);
+    RegDeleteKeyW(HKEY_CLASSES_ROOT, sub);
     swprintf_s(sub, L"%s\\CLSID", kProgId);
     RegDeleteKeyW(HKEY_CLASSES_ROOT, sub);
     RegDeleteKeyW(HKEY_CLASSES_ROOT, kProgId);
+    // 从系统预览处理器清单移除
+    HKEY hk = 0;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\PreviewHandlers", 0, KEY_SET_VALUE, &hk) == ERROR_SUCCESS)
+    {
+        RegDeleteValueW(hk, clsid);
+        RegCloseKey(hk);
+    }
     return S_OK;
 }
 
