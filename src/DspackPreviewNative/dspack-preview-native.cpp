@@ -11,6 +11,8 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include <cstdarg>
+#include <cstdio>
 #include "dspack-read.h"
 
 #pragma comment(lib, "ole32.lib")
@@ -48,6 +50,32 @@ void Log(const char* msg)
         WriteFile(h, "\r\n", 2, &w, 0);
         CloseHandle(h);
     }
+}
+
+void LogF(const char* fmt, ...)
+{
+    char buf[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    _vsnprintf_s(buf, _TRUNCATE, fmt, ap);
+    va_end(ap);
+    Log(buf);
+}
+
+void GuidStr(REFGUID g, char* out, size_t cap)
+{
+    wchar_t w[64] = { 0 };
+    StringFromGUID2(g, w, 64);
+    WideCharToMultiByte(CP_UTF8, 0, w, -1, out, (int)cap, 0, 0);
+}
+
+void LogProcess()
+{
+    wchar_t exe[MAX_PATH] = { 0 };
+    GetModuleFileNameW(NULL, exe, MAX_PATH);
+    char buf[1024];
+    WideCharToMultiByte(CP_UTF8, 0, exe, -1, buf, sizeof(buf), 0, 0);
+    LogF("DllMain attach pid=%lu exe=%s", GetCurrentProcessId(), buf);
 }
 
 void ClsidStr(wchar_t* out)
@@ -328,14 +356,16 @@ public:
     {
         if (!ppv) return E_POINTER;
         *ppv = 0;
+        char rs[64]; GuidStr(riid, rs, sizeof(rs));
+        HRESULT hr = E_NOINTERFACE;
         if (IsEqualGUID(riid, IID_IUnknown) || IsEqualGUID(riid, IID_IPreviewHandler))
-            *ppv = static_cast<IPreviewHandler*>(this);
+        { *ppv = static_cast<IPreviewHandler*>(this); hr = S_OK; }
         else if (IsEqualGUID(riid, IID_IInitializeWithFile))
-            *ppv = static_cast<IInitializeWithFile*>(this);
+        { *ppv = static_cast<IInitializeWithFile*>(this); hr = S_OK; }
         else if (IsEqualGUID(riid, IID_IInitializeWithStream))
-            *ppv = static_cast<IInitializeWithStream*>(this);
-        else
-            return E_NOINTERFACE;
+        { *ppv = static_cast<IInitializeWithStream*>(this); hr = S_OK; }
+        LogF("handler QI %s => 0x%08X", rs, (unsigned)hr);
+        if (FAILED(hr)) return hr;
         AddRef();
         return S_OK;
     }
@@ -454,12 +484,15 @@ public:
 
     STDMETHODIMP CreateInstance(IUnknown* pUnkOuter, REFIID riid, void** ppv)
     {
+        char rs[64]; GuidStr(riid, rs, sizeof(rs));
+        LogF("CreateInstance riid=%s", rs);
         if (ppv) *ppv = 0;
-        if (pUnkOuter) return CLASS_E_NOAGGREGATION;
+        if (pUnkOuter) { Log("  => CLASS_E_NOAGGREGATION"); return CLASS_E_NOAGGREGATION; }
         CDspackPreviewHandler* p = new (std::nothrow) CDspackPreviewHandler();
         if (!p) return E_OUTOFMEMORY;
         HRESULT hr = p->QueryInterface(riid, ppv);
         p->Release();
+        LogF("  => hr=0x%08X", (unsigned)hr);
         return hr;
     }
     STDMETHODIMP LockServer(BOOL fLock)
@@ -516,11 +549,15 @@ extern "C" HRESULT __stdcall DllUnregisterServer()
 
 extern "C" HRESULT __stdcall DllGetClassObject(REFCLSID rclsid, REFIID riid, void** ppv)
 {
-    if (!IsEqualGUID(rclsid, CLSID_DspackPreviewHandler)) return CLASS_E_CLASSNOTAVAILABLE;
+    char cs[64], rs[64];
+    GuidStr(rclsid, cs, sizeof(cs)); GuidStr(riid, rs, sizeof(rs));
+    LogF("DllGetClassObject cls=%s riid=%s", cs, rs);
+    if (!IsEqualGUID(rclsid, CLSID_DspackPreviewHandler)) { Log("  => CLASS_E_CLASSNOTAVAILABLE"); return CLASS_E_CLASSNOTAVAILABLE; }
     CDspackClassFactory* f = new (std::nothrow) CDspackClassFactory();
     if (!f) return E_OUTOFMEMORY;
     HRESULT hr = f->QueryInterface(riid, ppv);
     f->Release();
+    LogF("  => hr=0x%08X", (unsigned)hr);
     return hr;
 }
 
@@ -535,7 +572,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID)
     {
         g_hinst = h;
         DisableThreadLibraryCalls(h);
-        Log("DllMain attach (dspack-preview-native)");
+        LogProcess();
     }
     return TRUE;
 }
