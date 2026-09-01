@@ -34,13 +34,20 @@ int wmain(int argc, wchar_t** argv)
     bool okRead = ReadFile(h, buf.data(), size, &rd, 0) != 0;
     CloseHandle(h);
 
-    if (!okRead || rd < 12) { printf("ERROR: read failed / too small\n"); return 2; }
-    if (memcmp(buf.data(), "DSPK", 4) != 0) { printf("ERROR: not a dspack (no DSPK magic)\n"); return 2; }
-    uint32_t ver = (uint32_t)buf[4] | ((uint32_t)buf[5] << 8) | ((uint32_t)buf[6] << 16) | ((uint32_t)buf[7] << 24);
-    printf("dspack header version = %u\n", ver);
+    if (!okRead || rd < 4) { printf("ERROR: read failed / too small\n"); return 2; }
+
+    const BYTE* zip = buf.data();
+    size_t zipSize = rd;
+    if (rd >= 8 && memcmp(buf.data(), "DSPK", 4) == 0)
+    {
+        uint32_t ver = (uint32_t)buf[4] | ((uint32_t)buf[5] << 8) | ((uint32_t)buf[6] << 16) | ((uint32_t)buf[7] << 24);
+        printf("legacy DSPK header version = %u (skipping 8 bytes)\n", ver);
+        zip = buf.data() + 8;
+        zipSize = rd - 8;
+    }
 
     std::vector<BYTE> entry;
-    if (!ReadZipEntry(buf.data() + 8, rd - 8, "manifest.json", entry))
+    if (!ReadZipEntry(zip, zipSize, "manifest.json", entry))
     {
         printf("ERROR: manifest.json not found in zip\n");
         return 2;

@@ -12,7 +12,7 @@
 
 - ✅ 编译（MSVC，纯 Win32/COM，`/MT` 静态 CRT，无 .NET 依赖）；
 - ✅ COM 装载（类工厂 + `IPreviewHandler` + `IInitializeWithFile`）；
-- ✅ 读取 `.dspack`：剥 8 字节 `DSPK` 头 → 解 zip（内嵌 **miniz**，支持 stored/deflate/zip64）→ 解析 `manifest.json`（UTF-8 中文、`pickLang` 正确）；
+- ✅ 读取 `.dspack`：按标准 ZIP 解包（内嵌 **miniz**，支持 stored/deflate/zip64）→ 解析 `manifest.json`（UTF-8 中文、`pickLang` 正确）；
 - ✅ GDI 渲染摘要卡片（头带 + 统计芯片 + 描述 + 元数据，截图逐像素校验）；
 - ✅ 进程内运行时冒烟（`CoCreateInstance` → `DoPreview` → `WM_PAINT`/`WM_PRINT` 渲染，无崩溃）。
 
@@ -26,7 +26,7 @@ C# 托管版把整条读取链路都验证通了，但**无法用于生产**：`
 
 Windows 按扩展名查注册表 `HKLM\Software\Classes\.dspack\shellex\{8895b1c6-b41f-4c1c-a562-0d564250836f}`，加载实现 `IPreviewHandler` 的 COM 对象；预览处理器运行在独立宿主 **`prevhost.exe`**。
 
-`.dspack` = 8 字节 `DSPK` 头 + 标准 ZIP（根目录含 `manifest.json`）。读取时**先剥 8 字节**，再把余下字节交给 zip 库（miniz）。
+`.dspack` = **标准 ZIP**（根含 `manifest.json` + `dspack.json`），压缩软件可直接打开；读取时按普通 ZIP 解析（miniz）。
 
 ## 环境要求
 
@@ -46,7 +46,7 @@ build-native.cmd
 ## 测试
 
 ```bat
-:: 解析冒烟：剥头 → 解 zip → 解析 manifest → 打印字段
+:: 解析冒烟：按标准 ZIP 解包 → 解析 manifest → 打印字段
 parse-smoke.exe test\test-preview-1.0.0.dspack
 
 :: 运行时渲染冒烟：CoCreateInstance → DoPreview → 强制 WM_PRINT 渲染

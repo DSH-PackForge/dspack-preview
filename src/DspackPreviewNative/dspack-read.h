@@ -11,8 +11,8 @@ struct ManifestInfo {
     std::wstring error;
 };
 
-// 读取 zip 内某个条目（zip 指向已剥掉 8 字节 DSPK 头之后的纯 zip 缓冲区）。
-// 支持 method 0（stored）与 method 8（deflate，经 Cabinet Compression API）。
+// 读取 zip 内某个条目（zip 指向纯 ZIP 缓冲区；.dspack 即标准 ZIP）。
+// 支持 method 0（stored）与 method 8（deflate，经内置 miniz）。
 bool ReadZipEntry(const void* zip, size_t zipSize, const char* name, std::vector<BYTE>& out);
 
 // 解析 manifest.json（UTF-8）为摘要字段。

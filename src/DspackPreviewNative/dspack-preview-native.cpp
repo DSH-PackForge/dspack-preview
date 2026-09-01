@@ -99,11 +99,19 @@ struct PreviewData
 
 void LoadAndParseBuf(const BYTE* data, size_t size, PreviewData& d)
 {
-    if (size < 8 || memcmp(data, "DSPK", 4) != 0) { d.valid = false; d.error = L"不是有效的 .dspack 文件"; return; }
-    d.headerVersion = (uint32_t)data[4] | ((uint32_t)data[5] << 8) | ((uint32_t)data[6] << 16) | ((uint32_t)data[7] << 24);
+    // .dspack = 标准 ZIP（根目录含 manifest.json + dspack.json），无前导魔数字节。
+    // 仅为兼容早期的 8 字节 "DSPK" 头做一次剥头（新文件不会再带）。
+    const BYTE* zip = data;
+    size_t zipSize = size;
+    if (size >= 8 && memcmp(data, "DSPK", 4) == 0)
+    {
+        d.headerVersion = (uint32_t)data[4] | ((uint32_t)data[5] << 8) | ((uint32_t)data[6] << 16) | ((uint32_t)data[7] << 24);
+        zip = data + 8;
+        zipSize = size - 8;
+    }
 
     std::vector<BYTE> entry;
-    if (!ReadZipEntry(data + 8, size - 8, "manifest.json", entry))
+    if (!ReadZipEntry(zip, zipSize, "manifest.json", entry))
     {
         d.valid = false;
         d.error = L"压缩包中缺少 manifest.json";
@@ -209,7 +217,7 @@ void RenderPreview(HDC hdc, const RECT& rc, const PreviewData& d)
         RECT hsr = { hd.left + pad, hd.top + 48, hd.right - pad, hd.bottom - 8 };
         CardText(hdc, &hsr, d.error, fHeadSub, RGB(255, 235, 235));
         RECT br = { rc.left + pad, hd.bottom + 16, rc.right - pad, bottom - pad };
-        std::wstring hint = L"该文件可能不是有效的 DSHPack 整合包。\n要求:8 字节 \"DSPK\" 头 + 标准 ZIP,根目录含 manifest.json。";
+        std::wstring hint = L"该文件可能不是有效的 DSHPack 整合包。\n要求:标准 ZIP,根目录含 manifest.json。";
         CardText(hdc, &br, hint, fBody, P.sub, DT_WORDBREAK);
         goto done;
     }
