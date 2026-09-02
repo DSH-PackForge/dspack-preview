@@ -70,10 +70,11 @@ int wmain(int argc, wchar_t** argv)
         RECT fc = { 0, 0, w, hh };
         HBRUSH wb = CreateSolidBrush(RGB(255, 255, 255)); FillRect(mdc, &fc, wb); DeleteObject(wb);
         SendMessageW(child, WM_PRINT, (WPARAM)mdc, PRF_CLIENT);
-        COLORREF c = GetPixel(mdc, 10, 10);
+        // 新卡片：头带在卡片顶部中央（含外边距），取样 (250, 26) 应为 indigo 渐变
+        COLORREF c = GetPixel(mdc, 250, 26);
         printf("header pixel = R%d G%d B%d\n", GetRValue(c), GetGValue(c), GetBValue(c));
-        // indigo header (accent 63,68,148) => parsed + rendered the real card
-        ok = (GetRValue(c) >= 40 && GetRValue(c) <= 90 && GetBValue(c) >= 120) ? 1 : 0;
+        // indigo header gradient (74,80,168 -> 91,95,190) => parsed + rendered the real card
+        ok = (GetRValue(c) >= 40 && GetRValue(c) <= 110 && GetBValue(c) >= 120) ? 1 : 0;
         SelectObject(mdc, ob);
         DeleteObject(bmp); DeleteDC(mdc); ReleaseDC(child, cdc);
     }

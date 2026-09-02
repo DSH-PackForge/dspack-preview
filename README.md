@@ -4,17 +4,19 @@
 
 选中 `.dspack` 文件后，在资源管理器「预览窗格」（`Alt+P`）里直接展示整合包摘要卡片（名称 / 版本 / 类型 / 描述 / 依赖计数），无需解包、无需打开市场页。
 
-> 格式契约见 [DSH-PackForge](https://github.com/DSH-PackForge/DSH-PackForge) 的 `specs/pack-structure/v2.md` 与 `specs/manifest/v4.md`。
+> 格式契约见 [DSH-PackForge](https://github.com/DSH-PackForge/DSH-PackForge) 的 `specs/pack-structure/v2.md`（现行 `.dspack` v2）与 `specs/manifest/v4.md`（现行 profile 契约）；预览处理器**同时兼容** `pack-structure/v3.md`（容器 v3）与 `manifest/v5.md`（`type:"dshhome"` 形态）。
 
 ## 现状（原生 C++ 版，已实现）
 
 原生 C++ 处理器已完整实现并**在本地验证通过**：
 
 - ✅ 编译（MSVC，纯 Win32/COM，`/MT` 静态 CRT，无 .NET 依赖）；
-- ✅ COM 装载（类工厂 + `IPreviewHandler` + `IInitializeWithFile`）；
-- ✅ 读取 `.dspack`：按标准 ZIP 解包（内嵌 **miniz**，支持 stored/deflate/zip64）→ 解析 `manifest.json`（UTF-8 中文、`pickLang` 正确）；
-- ✅ GDI 渲染摘要卡片（头带 + 统计芯片 + 描述 + 元数据，截图逐像素校验）；
-- ✅ 进程内运行时冒烟（`CoCreateInstance` → `DoPreview` → `WM_PAINT`/`WM_PRINT` 渲染，无崩溃）。
+- ✅ COM 装载（类工厂 + `IPreviewHandler` + `IInitializeWithFile` / `IInitializeWithStream` + `IPreviewHandlerVisuals`）；
+- ✅ 读取 `.dspack`：按标准 ZIP 解包（内嵌 **miniz**，支持 stored/deflate/zip64）→ 校验根 `dspack.json`（容器 v2/v3）→ 解析 `manifest.json`（v4/v5，UTF-8 中文、`pickLang` 正确、`dshhome` 字段）；
+- ✅ **GDI+ 渲染**摘要卡片（渐变头带 + 统计卡 + 圆角 + 软阴影 + 导入按钮，无 .NET 依赖）；
+- ✅ **深色模式**（`IPreviewHandlerVisuals::SetBackgroundColor` 自动切换亮/暗两套配色）；
+- ✅ **滚动 + 按钮反馈**（滚轮 / 滚动条，短窗格不截断；悬停高亮 + 手型光标）；
+- ✅ 进程内运行时冒烟（`CoCreateInstance`/`LoadLibrary` → `DoPreview` → `WM_PRINT` 渲染，无崩溃）。
 
 ## 实测结论（2026-09）
 
@@ -26,7 +28,7 @@ C# 托管版把整条读取链路都验证通了，但**无法用于生产**：`
 
 Windows 按扩展名查注册表 `HKLM\Software\Classes\.dspack\shellex\{8895b1c6-b41f-4c1c-a562-0d564250836f}`，加载实现 `IPreviewHandler` 的 COM 对象；预览处理器运行在独立宿主 **`prevhost.exe`**。
 
-`.dspack` = **标准 ZIP**（根含 `manifest.json` + `dspack.json`），压缩软件可直接打开；读取时按普通 ZIP 解析（miniz）。
+`.dspack` = **标准 ZIP**（根含 `manifest.json` + `dspack.json`），压缩软件可直接打开；读取时按普通 ZIP 解析（miniz）。加载器先读根 `dspack.json` 校验容器（`format:"dspack"` 且 `version∈{2,3}`，缺失/不符即拒载），再读 `manifest.json`（`manifestVersion` 4/5，`type:"profile"` / `type:"dshhome"` 两形态），卡片按形态显示对应统计与元数据。
 
 ## 环境要求
 
@@ -46,8 +48,12 @@ build-native.cmd
 ## 测试
 
 ```bat
-:: 解析冒烟：按标准 ZIP 解包 → 解析 manifest → 打印字段
-parse-smoke.exe test\test-preview-1.0.0.dspack
+:: 解析冒烟：按标准 ZIP 解包 → 校验 dspack.json → 解析 manifest → 打印字段
+parse-smoke.exe test\test-preview-1.0.0.dspack      :: profile 形态（容器 v2 + manifest v4）
+parse-smoke.exe test\whale-studio-1.0.0.dspack     :: dshhome 形态（容器 v3 + manifest v5）
+
+:: 生成 dshhome 测试包（PowerShell）
+powershell -NoProfile -ExecutionPolicy Bypass -File test\make-dshhome-pack.ps1
 
 :: 运行时渲染冒烟：CoCreateInstance → DoPreview → 强制 WM_PRINT 渲染
 cl /nologo /O2 /MT /EHsc test\render-test.cpp /link /OUT:render-test.exe ole32.lib user32.lib uuid.lib gdi32.lib
@@ -56,6 +62,10 @@ render-test.exe test\test-preview-1.0.0.dspack
 :: 流式初始化冒烟（IInitializeWithStream 通道）：
 cl /nologo /O2 /MT /EHsc /DUNICODE /D_UNICODE test\stream-test.cpp /link /OUT:stream-test.exe ole32.lib shlwapi.lib user32.lib gdi32.lib uuid.lib
 stream-test.exe src\DspackPreviewNative\DspackPreviewNative.dll test\test-preview-1.0.0.dspack
+
+:: 渲染截图（LoadLibrary 直连新 DLL，免注册；输出 capture-light.bmp / capture-dark.bmp）
+test\build-tests.cmd
+capture-test.exe src\DspackPreviewNative\DspackPreviewNative.dll test\test-preview-1.0.0.dspack
 ```
 
 ## 注册 / 卸载
@@ -95,11 +105,13 @@ test/
 ## TODO / 路线
 
 - [x] 原生 C++ 重写（解析 + 渲染 + 本地验证）。
+- [x] GDI+ 精修卡片（渐变头带 / 统计卡 / 圆角 / 软阴影 / 一键导入按钮）。
+- [x] 深色模式（`IPreviewHandlerVisuals`）。
+- [x] 滚动 + 按钮悬停反馈（短窗格不截断、手型光标）。
+- [x] 容器校验（`dspack.json` v2/v3）+ manifest v5 `type:"dshhome"` 形态。
+- [x] `displayName/description` 多语言 `pickLang` 对齐市场页。
 - [ ] 机器级注册后在真实资源管理器预览窗格确认显示（`prevhost` 加载）。
-- [ ] 流式读取（避免整包 `ReadAllBytes`），大文件自动跳过。
-- [ ] 丰富卡片排版，或用 WebView2 渲染 HTML。
-- [ ] `displayName/description` 多语言 `pickLang` 对齐市场页。
-- [ ] 深色模式（`IPreviewHandlerVisuals`）。
+- [ ] 流式读取（避免整包读入），大文件自动跳过。
 - [ ] 补缩略图 `IThumbnailProvider`（本仓库当前只做预览）。
 - [ ] CI 构建 + 发布发布物。
 

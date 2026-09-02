@@ -1,0 +1,27 @@
+{
+  "manifestVersion": 5,
+  "type": "dshhome",
+  "name": "whale-studio",
+  "version": "1.0.0",
+  "displayName": {
+    "en-US": "Whale Studio",
+    "zh-CN": "大肥鱼工作室"
+  },
+  "description": {
+    "en-US": "A full DSH home snapshot (multi-profile + presets + skills).",
+    "zh-CN": "一整套 DSH 工作台快照（多 profile + 预设 + 技能）。"
+  },
+  "author": "hxh230802",
+  "dshVersion": "0.1.1-rc.2",
+  "defaultProfile": "whale",
+  "profiles": {
+    "whale": {
+      "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "dafy-whale-theme", "dsh-pet"],
+      "dependencies": { "dsh-pet": "0.2.0", "github:DViridescent/dafy-whale-theme": "99e8c57" }
+    },
+    "minimal": { "bundles": ["@deepseek-ai/dsh-base"], "dependencies": {} }
+  },
+  "presets": { "coding": { "path": ".agent-presets/coding" } },
+  "skills": [{ "path": "skills/whale-writer" }],
+  "instructions": "AGENTS.md"
+}

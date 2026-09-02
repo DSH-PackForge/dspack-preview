@@ -16,6 +16,9 @@ obj/
 
 # 测试截图
 render-capture.*
+capture-*.bmp
+capture-*.png
+capture-*.jpg
 
 # 测试产物（由 test/make-test-pack.ps1 生成）
 *.dspack

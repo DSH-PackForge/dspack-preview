@@ -66,24 +66,53 @@ int wmain(int argc, wchar_t** argv)
     PrintW("type", info.type);
     PrintW("author", info.author);
     PrintW("dshVersion", info.dshVersion);
+    printf("manifestVersion = %d\n", info.manifestVersion);
     printf("bundles = %d\n", info.bundles);
     printf("dependencies = %d\n", info.dependencies);
     printf("files = %d\n", info.files);
+    printf("profiles = %d\n", info.profiles);
+    printf("presets = %d\n", info.presets);
+    printf("skills = %d\n", info.skills);
+    PrintW("profileName", info.profileName);
+    PrintW("defaultProfile", info.defaultProfile);
+    PrintW("instructions", info.instructions);
+    PrintW("icon", info.icon);
+    PrintW("patch", info.patch);
     PrintW("displayName", info.displayName);
     PrintCp("displayName", info.displayName);
     PrintCp("description", info.description);
 
-    bool ok = info.ok
-        && info.name == L"test-preview-pack"
-        && info.version == L"1.0.0"
-        && info.type == L"profile"
-        && info.author == L"hxh230802"
-        && info.dshVersion == L"0.1.1-rc.2"
-        && info.bundles == 3
-        && info.dependencies == 2
-        && info.files == 1
-        && info.displayName == L"Test Preview Pack"
-        && !info.description.empty();
+    bool ok;
+    if (info.type == L"dshhome")
+    {
+        ok = info.ok
+            && info.name == L"whale-studio"
+            && info.version == L"1.0.0"
+            && info.manifestVersion == 5
+            && info.profiles == 2
+            && info.presets == 1
+            && info.skills == 1
+            && info.defaultProfile == L"whale"
+            && info.instructions == L"AGENTS.md"
+            && info.displayName == L"Whale Studio"
+            && !info.description.empty();
+    }
+    else
+    {
+        ok = info.ok
+            && info.name == L"test-preview-pack"
+            && info.version == L"1.0.0"
+            && info.type == L"profile"
+            && info.author == L"hxh230802"
+            && info.dshVersion == L"0.1.1-rc.2"
+            && info.manifestVersion == 4
+            && info.bundles == 3
+            && info.dependencies == 2
+            && info.files == 1
+            && info.profileName == L"test-preview-pack"
+            && info.displayName == L"Test Preview Pack"
+            && !info.description.empty();
+    }
 
     if (ok) { printf("SMOKE OK\n"); return 0; }
     printf("SMOKE FAIL\n");

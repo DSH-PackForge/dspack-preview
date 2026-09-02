@@ -200,6 +200,12 @@ bool AsString(const JNode* n, std::wstring& out)
     return false;
 }
 
+bool AsNumber(const JNode* n, int& out)
+{
+    if (n && n->t == JNode::Num) { out = (int)n->num; return true; }
+    return false;
+}
+
 // pickLang: en-US -> zh-CN -> first
 bool GetLocalized(const JNode& o, const wchar_t* key, std::wstring& out)
 {
@@ -223,6 +229,18 @@ int Count(const JNode& o, const wchar_t* key, JNode::T want)
 }
 } // namespace
 
+bool ParseContainerJson(const BYTE* data, size_t len, ContainerInfo& out)
+{
+    Parser parser(data, len);
+    JNode root;
+    if (!parser.value(root) || root.t != JNode::Obj) return false;
+    std::wstring format;
+    if (!AsString(Get(root, L"format"), format) || format != L"dspack") return false;
+    AsNumber(Get(root, L"version"), out.version);
+    out.valid = true;
+    return true;
+}
+
 bool ParseManifest(const BYTE* data, size_t len, ManifestInfo& info)
 {
     Parser parser(data, len);
@@ -234,15 +252,25 @@ bool ParseManifest(const BYTE* data, size_t len, ManifestInfo& info)
         return false;
     }
     info.ok = true;
+    AsNumber(Get(root, L"manifestVersion"), info.manifestVersion);
     AsString(Get(root, L"name"), info.name);
     AsString(Get(root, L"version"), info.version);
     AsString(Get(root, L"type"), info.type);
     AsString(Get(root, L"author"), info.author);
     AsString(Get(root, L"dshVersion"), info.dshVersion);
+    AsString(Get(root, L"profileName"), info.profileName);
+    AsString(Get(root, L"icon"), info.icon);
+    AsString(Get(root, L"patch"), info.patch);
     GetLocalized(root, L"displayName", info.displayName);
     GetLocalized(root, L"description", info.description);
     info.bundles = Count(root, L"bundles", JNode::Arr);
     info.dependencies = Count(root, L"dependencies", JNode::Obj);
     info.files = Count(root, L"files", JNode::Arr);
+    // dshhome 形态（manifest v5）
+    AsString(Get(root, L"defaultProfile"), info.defaultProfile);
+    AsString(Get(root, L"instructions"), info.instructions);
+    info.profiles = Count(root, L"profiles", JNode::Obj);
+    info.presets = Count(root, L"presets", JNode::Obj);
+    info.skills = Count(root, L"skills", JNode::Arr);
     return true;
 }
