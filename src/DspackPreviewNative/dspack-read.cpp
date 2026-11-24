@@ -333,7 +333,7 @@ bool ParseManifest(const BYTE* data, size_t len, ManifestInfo& info)
         const JNode* resources = Get(root, L"resources");
         if (resources && resources->t == JNode::Obj)
         {
-            const wchar_t* groups[][2] = {{L"path.json", L"插件资源"}, {L"provider.json", L"模型提供方"},
+            const wchar_t* groups[][2] = {{L"path.json", L"插件数据"}, {L"provider.json", L"模型服务商"},
                                           {L"mcp.json", L"MCP 服务"}, {L"skill.json", L"技能"}};
             for (const auto& group : groups)
             {

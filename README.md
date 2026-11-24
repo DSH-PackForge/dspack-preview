@@ -4,7 +4,7 @@
 
 选中 `.dspack` 文件后，在资源管理器「预览窗格」（`Alt+P`）里直接展示整合包摘要卡片（名称 / 版本 / 类型 / 描述 / 依赖计数），无需解包、无需打开市场页。
 
-新版清单 v6 使用容器 v4，预览卡按系统语言显示每个配置档的插件及公开资源摘要。处理器还支持清单 v4 与 v5。格式定义见 [DSH-PackForge](https://github.com/DSH-PackForge/DSH-PackForge/tree/main/specs)。
+新版清单（manifest）v6 配套容器（pack-structure）v4，预览卡片会按系统语言展示各配置档（profile）的插件及可公开的资源摘要；处理器同时兼容清单 v4 与 v5。格式定义见 [DSH-PackForge](https://github.com/DSH-PackForge/DSH-PackForge/tree/main/specs)。
 
 ## 现状（原生 C++ 版，已实现）
 
