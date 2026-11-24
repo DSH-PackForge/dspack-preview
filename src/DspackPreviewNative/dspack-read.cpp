@@ -207,14 +207,33 @@ bool AsNumber(const JNode* n, int& out)
 }
 
 // pickLang: en-US -> zh-CN -> first
-bool GetLocalized(const JNode& o, const wchar_t* key, std::wstring& out)
+bool GetLocalized(const JNode& o, const wchar_t* key, std::wstring& out, bool systemLanguage = false)
 {
     const JNode* n = Get(o, key);
     if (!n) return false;
     if (n->t == JNode::Str) { out = n->str; return true; }
     if (n->t == JNode::Obj)
     {
+        if (systemLanguage)
+        {
+            wchar_t locale[LOCALE_NAME_MAX_LENGTH] = {};
+            if (GetUserDefaultLocaleName(locale, LOCALE_NAME_MAX_LENGTH))
+            {
+                const std::wstring language(locale);
+                const std::wstring base = language.substr(0, language.find(L'-'));
+                for (const auto& pair : n->obj)
+                {
+                    if (!_wcsicmp(pair.first.c_str(), locale) && AsString(&pair.second, out)) { return true; }
+                }
+                for (const auto& pair : n->obj)
+                {
+                    const std::wstring tag = pair.first.substr(0, pair.first.find(L'-'));
+                    if (!_wcsicmp(tag.c_str(), base.c_str()) && AsString(&pair.second, out)) { return true; }
+                }
+            }
+        }
         if (AsString(Get(*n, L"en-US"), out)) return true;
+        if (AsString(Get(*n, L"en"), out)) return true;
         if (AsString(Get(*n, L"zh-CN"), out)) return true;
         if (!n->obj.empty()) return AsString(&n->obj[0].second, out);
     }
@@ -226,6 +245,36 @@ int Count(const JNode& o, const wchar_t* key, JNode::T want)
     const JNode* n = Get(o, key);
     if (!n || n->t != want) return 0;
     return (int)(want == JNode::Arr ? n->arr.size() : n->obj.size());
+}
+
+void AddDetail(ManifestInfo& info, const wchar_t* label, const JNode& item,
+               const std::wstring& id, const std::wstring& scope)
+{
+    std::wstring name, desc, ref, commit, plugin;
+    GetLocalized(item, L"name", name, true);
+    GetLocalized(item, L"desc", desc, true);
+    AsString(Get(item, L"plugin"), plugin);
+    AsString(Get(item, L"ref"), ref);
+    AsString(Get(item, L"commit"), commit);
+    std::wstring text = name.empty() ? id : name;
+    if (!name.empty() && name != id) { text += L" (" + id + L")"; }
+    for (const auto& field : {scope, plugin, ref, commit, desc})
+    {
+        if (!field.empty()) { text += L" · " + field; }
+    }
+    info.details.emplace_back(label, text);
+}
+
+void AddPlugins(ManifestInfo& info, const JNode& unit, const std::wstring& scope)
+{
+    const JNode* plugins = Get(unit, L"plugins");
+    if (plugins && plugins->t == JNode::Obj)
+    {
+        for (const auto& plugin : plugins->obj)
+        {
+            AddDetail(info, L"插件", plugin.second, plugin.first, scope);
+        }
+    }
 }
 } // namespace
 
@@ -272,5 +321,34 @@ bool ParseManifest(const BYTE* data, size_t len, ManifestInfo& info)
     info.profiles = Count(root, L"profiles", JNode::Obj);
     info.presets = Count(root, L"presets", JNode::Obj);
     info.skills = Count(root, L"skills", JNode::Arr);
+    info.details.clear();
+    if (info.manifestVersion == 6)
+    {
+        const JNode* profiles = Get(root, L"profiles");
+        if (info.type == L"dshhome" && profiles && profiles->t == JNode::Obj)
+        {
+            for (const auto& unit : profiles->obj) { AddPlugins(info, unit.second, unit.first); }
+        }
+        else { AddPlugins(info, root, L""); }
+        const JNode* resources = Get(root, L"resources");
+        if (resources && resources->t == JNode::Obj)
+        {
+            const wchar_t* groups[][2] = {{L"path.json", L"插件资源"}, {L"provider.json", L"模型提供方"},
+                                          {L"mcp.json", L"MCP 服务"}, {L"skill.json", L"技能"}};
+            for (const auto& group : groups)
+            {
+                const JNode* rows = Get(*resources, group[0]);
+                if (!rows || rows->t != JNode::Arr) { continue; }
+                for (const auto& row : rows->arr)
+                {
+                    std::wstring id, scope;
+                    if (!AsString(Get(row, L"id"), id)) { continue; }
+                    AsString(Get(row, L"scope"), scope);
+                    AddDetail(info, group[1], row, id, scope);
+                    if (wcscmp(group[0], L"skill.json") == 0) { ++info.skills; }
+                }
+            }
+        }
+    }
     return true;
 }

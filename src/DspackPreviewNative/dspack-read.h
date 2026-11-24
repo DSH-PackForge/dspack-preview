@@ -7,16 +7,17 @@ struct ManifestInfo {
     std::wstring name, version, type, author, dshVersion;
     std::wstring displayName, description;
     std::wstring profileName, icon, patch;
-    int manifestVersion = 0;        // manifest.json 的 manifestVersion 字段（4 / 5）
+    int manifestVersion = 0;
     int bundles = 0, dependencies = 0, files = 0;
     // dshhome 形态（type == "dshhome"，manifest v5）
     std::wstring defaultProfile, instructions;
     int profiles = 0, presets = 0, skills = 0;
+    std::vector<std::pair<std::wstring, std::wstring>> details;
     bool ok = false;
     std::wstring error;
 };
 
-// 容器标记 dspack.json（pack-structure v2/v3）：{ "format":"dspack", "version":2|3 }
+// 容器标记 dspack.json 保存独立于清单的结构版本。
 struct ContainerInfo {
     int version = 0;    // version 字段
     bool valid = false; // format == "dspack"

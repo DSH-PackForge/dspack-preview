@@ -4,13 +4,14 @@
   Usage: .\make-test-pack.ps1 [-OutFile test-preview-1.0.0.dspack]
 #>
 param(
-    [string]$OutFile = "test-preview-1.0.0.dspack"
+    [string]$OutFile = "test-preview-1.0.0.dspack",
+    [ValidateSet("fixtures", "fixtures-v6")][string]$Fixture = "fixtures"
 )
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$fixtures = Join-Path $ScriptDir "fixtures"
+$fixtures = Join-Path $ScriptDir $Fixture
 
 if (-not (Test-Path (Join-Path $fixtures "manifest.json"))) {
     throw "fixtures/manifest.json not found under $fixtures"

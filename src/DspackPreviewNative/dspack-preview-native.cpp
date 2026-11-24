@@ -11,6 +11,7 @@
 #include <new>
 #include <wchar.h>
 #include <cstring>
+#include <algorithm>
 #include <string>
 #include <vector>
 #include <cstdarg>
@@ -119,7 +120,7 @@ struct PreviewData
 {
     bool valid = false;
     uint32_t headerVersion = 0;   // 旧 8 字节 DSPK 魔数头里的版本（兼容用）
-    int containerVersion = 0;     // dspack.json 的 version（2/3；旧魔数头=1）
+    int containerVersion = 0;     // dspack.json 的 version（2 至 4；旧魔数头=1）
     ManifestInfo info;
     std::wstring error;
     RECT btnCatalog = { 0, 0, 0, 0 };
@@ -158,10 +159,10 @@ void LoadAndParseBuf(const BYTE* data, size_t size, PreviewData& d)
             d.error = L"dspack.json 无效（format 应为 \"dspack\"）";
             return;
         }
-        if (ci.version < 2 || ci.version > 3)
+        if (ci.version < 2 || ci.version > 4)
         {
             d.valid = false;
-            d.error = L"不支持的 .dspack 容器版本（支持 v2 / v3）";
+            d.error = L"不支持的 .dspack 容器版本（支持 v2 / v3 / v4）";
             return;
         }
         d.containerVersion = ci.version;
@@ -189,6 +190,12 @@ void LoadAndParseBuf(const BYTE* data, size_t size, PreviewData& d)
     {
         d.valid = false;
         d.error = L"manifest.json 解析失败";
+        return;
+    }
+    if ((d.containerVersion == 4) != (d.info.manifestVersion == 6))
+    {
+        d.valid = false;
+        d.error = L"容器 v4 必须搭配清单 v6";
         return;
     }
     d.valid = true;
@@ -613,7 +620,16 @@ void RenderPreview(HDC hdc, const RECT& rc, PreviewData& d)
         descH = fullH < maxH ? fullH : maxH;
     }
 
+    float lblW = (float)UiPx(96, sc);
+    const float detailWidth = std::max(1.0f, cw - lblW - UiPx(10, sc));
+    std::vector<int> detailHeights;
     int metaH = 4 * bodyLh + 3 * rowGap;
+    for (const auto& row : mf.details)
+    {
+        const int h = std::max(bodyLh, MeasureHeightF(g, row.second, fBody, (int)detailWidth));
+        detailHeights.push_back(h);
+        metaH += h + rowGap;
+    }
 
     float bodyH = statH
         + sectGap + sectLh + UiPx(12, sc)
@@ -729,7 +745,6 @@ void RenderPreview(HDC hdc, const RECT& rc, PreviewData& d)
     }
 
     // 元数据行
-    float lblW = (float)UiPx(96, sc);
     const wchar_t* rk[4]; std::wstring rv[4];
     rk[0] = L"标识"; rv[0] = mf.name;
     rk[1] = L"类型"; rv[1] = typeLabel;
@@ -743,6 +758,17 @@ void RenderPreview(HDC hdc, const RECT& rc, PreviewData& d)
         Gdiplus::RectF vr(bx + lblW + UiPx(10, sc), y, cw - lblW - UiPx(10, sc), (float)bodyLh);
         DrawTextF(g, rv[i], fBody, P.text, vr, false, true, false);
         y += bodyLh + rowGap;
+    }
+
+    for (size_t index = 0; index < mf.details.size(); ++index)
+    {
+        const auto& row = mf.details[index];
+        const float h = (float)detailHeights[index];
+        Gdiplus::RectF label(bx, y, lblW, (float)bodyLh);
+        DrawTextF(g, row.first, fChip, P.sub, label, false, true, false);
+        Gdiplus::RectF value(bx + lblW + UiPx(10, sc), y, detailWidth, h);
+        DrawTextF(g, row.second, fBody, P.text, value, false, false, true);
+        y += h + rowGap;
     }
 
     // 卡片描边（最上层，保持清晰）

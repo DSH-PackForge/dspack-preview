@@ -82,8 +82,22 @@ int wmain(int argc, wchar_t** argv)
     PrintCp("displayName", info.displayName);
     PrintCp("description", info.description);
 
+    ContainerInfo marker;
+    if (!ReadZipEntry(zip, zipSize, "dspack.json", entry) ||
+        !ParseContainerJson(entry.data(), entry.size(), marker) || !marker.valid)
+    {
+        printf("ERROR: invalid dspack.json\n");
+        return 2;
+    }
+    printf("container = %d\n", marker.version);
     bool ok;
-    if (info.type == L"dshhome")
+    if (info.manifestVersion == 6)
+    {
+        ok = marker.version == 4 && info.profiles == 1 && info.skills == 1 && info.details.size() == 2 &&
+            info.details[0].second.find(L"example-plugin") != std::wstring::npos &&
+            info.details[1].second.find(L"main") != std::wstring::npos;
+    }
+    else if (info.type == L"dshhome")
     {
         ok = info.ok
             && info.name == L"whale-studio"
