@@ -23,9 +23,10 @@ struct ContainerInfo {
     bool valid = false; // format == "dspack"
 };
 
-// 读取 zip 内某个条目（zip 指向纯 ZIP 缓冲区；.dspack 即标准 ZIP）。
-// 支持 method 0（stored）与 method 8（deflate，经内置 miniz）。
-bool ReadZipEntry(const void* zip, size_t zipSize, const char* name, std::vector<BYTE>& out);
+// 预览器读取归档和解压单个元数据条目的大小预算。
+constexpr size_t kPreviewByteLimit = 64u << 20;
+enum class ZipReadStatus { Ok, Missing, Invalid, TooLarge };
+ZipReadStatus ReadZipEntry(const void* zip, size_t zipSize, const char* name, std::vector<BYTE>& out);
 
 // 解析 dspack.json（UTF-8）为容器标记信息。
 bool ParseContainerJson(const BYTE* data, size_t len, ContainerInfo& out);
@@ -33,9 +34,5 @@ bool ParseContainerJson(const BYTE* data, size_t len, ContainerInfo& out);
 // 解析 manifest.json（UTF-8）为摘要字段。
 bool ParseManifest(const BYTE* data, size_t len, ManifestInfo& info);
 
-// 读取 zip 内某个条目（zip 指向纯 ZIP 缓冲区；.dspack 即标准 ZIP）。
-// 支持 method 0（stored）与 method 8（deflate，经内置 miniz）。
-bool ReadZipEntry(const void* zip, size_t zipSize, const char* name, std::vector<BYTE>& out);
-
-// 解析 manifest.json（UTF-8）为摘要字段。
-bool ParseManifest(const BYTE* data, size_t len, ManifestInfo& info);
+// 读取归档清单，v6 技能数量取自可选 skill.json 中的实际条目。
+bool ReadPackManifest(const void* zip, size_t zipSize, ManifestInfo& info);

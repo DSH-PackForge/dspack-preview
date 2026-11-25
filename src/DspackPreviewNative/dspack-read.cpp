@@ -3,22 +3,28 @@
 #include "third_party/miniz/miniz.h"
 #include <cstring>
 #include <cmath>
+#include <memory>
 
 // ---------- ZIP reader (miniz; supports stored + deflate + zip64) ----------
-bool ReadZipEntry(const void* zip, size_t zipSize, const char* name, std::vector<BYTE>& out)
+ZipReadStatus ReadZipEntry(const void* zip, size_t zipSize, const char* name, std::vector<BYTE>& out)
 {
-    mz_zip_archive arc;
-    memset(&arc, 0, sizeof(arc));
-    if (!mz_zip_reader_init_mem(&arc, zip, zipSize, 0)) return false;
-
-    size_t outSize = 0;
-    void* p = mz_zip_reader_extract_file_to_heap(&arc, name, &outSize, 0);
-    mz_zip_reader_end(&arc);
-    if (!p) return false;
-
-    out.assign((const BYTE*)p, (const BYTE*)p + outSize);
-    mz_free(p);
-    return true;
+    out.clear();
+    mz_zip_archive arc = {};
+    if (!mz_zip_reader_init_mem(&arc, zip, zipSize, 0)) { return ZipReadStatus::Invalid; }
+    const std::unique_ptr<mz_zip_archive, decltype(&mz_zip_reader_end)> reader(&arc, mz_zip_reader_end);
+    const int index = mz_zip_reader_locate_file(&arc, name, nullptr, 0);
+    if (index < 0) { return ZipReadStatus::Missing; }
+    mz_zip_archive_file_stat entry = {};
+    if (!mz_zip_reader_file_stat(&arc, index, &entry) || !entry.m_uncomp_size) { return ZipReadStatus::Invalid; }
+    if (entry.m_uncomp_size > kPreviewByteLimit) { return ZipReadStatus::TooLarge; }
+    try { out.resize(static_cast<size_t>(entry.m_uncomp_size)); }
+    catch (const std::bad_alloc&) { return ZipReadStatus::Invalid; }
+    if (!mz_zip_reader_extract_to_mem(&arc, index, out.data(), out.size(), 0))
+    {
+        out.clear();
+        return ZipReadStatus::Invalid;
+    }
+    return ZipReadStatus::Ok;
 }
 
 // ---------- minimal JSON parser (UTF-8 in -> UTF-16 out) ----------
@@ -345,10 +351,50 @@ bool ParseManifest(const BYTE* data, size_t len, ManifestInfo& info)
                     if (!AsString(Get(row, L"id"), id)) { continue; }
                     AsString(Get(row, L"scope"), scope);
                     AddDetail(info, group[1], row, id, scope);
-                    if (wcscmp(group[0], L"skill.json") == 0) { ++info.skills; }
                 }
             }
         }
     }
     return true;
+}
+
+bool ReadPackManifest(const void* zip, size_t zipSize, ManifestInfo& info)
+{
+    std::vector<BYTE> entry;
+    const auto manifest = ReadZipEntry(zip, zipSize, "manifest.json", entry);
+    if (manifest == ZipReadStatus::TooLarge)
+    {
+        info.error = L"manifest.json 解压后超过 64 MiB 预览上限";
+        return false;
+    }
+    if (manifest != ZipReadStatus::Ok || !ParseManifest(entry.data(), entry.size(), info))
+    {
+        info.error = L"manifest.json 缺失或解析失败";
+        return false;
+    }
+    if (info.manifestVersion != 6) { return true; }
+    info.skills = 0;
+    const auto skills = ReadZipEntry(zip, zipSize, "skill.json", entry);
+    if (skills == ZipReadStatus::Missing) { return true; }
+    if (skills == ZipReadStatus::TooLarge)
+    {
+        info.error = L"skill.json 解压后超过 64 MiB 预览上限";
+        return false;
+    }
+    if (skills == ZipReadStatus::Ok)
+    {
+        Parser parser(entry.data(), entry.size());
+        JNode root;
+        if (parser.value(root))
+        {
+            const JNode* items = Get(root, L"items");
+            if (items && items->t == JNode::Arr)
+            {
+                info.skills = (int)items->arr.size();
+                return true;
+            }
+        }
+    }
+    info.error = L"skill.json 解析失败";
+    return false;
 }

@@ -3,6 +3,8 @@
   "type": "dshhome",
   "name": "example",
   "version": "1.0.0",
+  "displayName": "写作工作台",
+  "description": "包含写作插件和一项保存在归档内的写作技能。",
   "defaultProfile": "work",
   "profiles": {
     "work": {
@@ -12,6 +14,6 @@
     }
   },
   "resources": {
-    "skill.json": [{"id":"writing","scope":"home","name":"写作","ref":"main"}]
+    "skill.json": [{"id":"writing","scope":"home","name":"写作"}]
   }
 }

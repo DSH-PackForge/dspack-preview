@@ -47,15 +47,8 @@ int wmain(int argc, wchar_t** argv)
     }
 
     std::vector<BYTE> entry;
-    if (!ReadZipEntry(zip, zipSize, "manifest.json", entry))
-    {
-        printf("ERROR: manifest.json not found in zip\n");
-        return 2;
-    }
-    printf("manifest.json size = %u\n", (unsigned)entry.size());
-
     ManifestInfo info;
-    if (!ParseManifest(entry.data(), entry.size(), info))
+    if (!ReadPackManifest(zip, zipSize, info))
     {
         printf("ERROR: manifest parse failed\n");
         return 2;
@@ -83,7 +76,7 @@ int wmain(int argc, wchar_t** argv)
     PrintCp("description", info.description);
 
     ContainerInfo marker;
-    if (!ReadZipEntry(zip, zipSize, "dspack.json", entry) ||
+    if (ReadZipEntry(zip, zipSize, "dspack.json", entry) != ZipReadStatus::Ok ||
         !ParseContainerJson(entry.data(), entry.size(), marker) || !marker.valid)
     {
         printf("ERROR: invalid dspack.json\n");
@@ -93,9 +86,11 @@ int wmain(int argc, wchar_t** argv)
     bool ok;
     if (info.manifestVersion == 6)
     {
-        ok = marker.version == 4 && info.profiles == 1 && info.skills == 1 && info.details.size() == 2 &&
+        bool noSummary = argc == 3 && wcscmp(argv[2], L"--without-resource-summary") == 0;
+        ok = marker.version == 4 && info.profiles == 1 && info.skills == 1 &&
+            info.details.size() == (noSummary ? 1 : 2) &&
             info.details[0].second.find(L"example-plugin") != std::wstring::npos &&
-            info.details[1].second.find(L"main") != std::wstring::npos;
+            (noSummary || info.details[1].second.find(L"writing") != std::wstring::npos);
     }
     else if (info.type == L"dshhome")
     {

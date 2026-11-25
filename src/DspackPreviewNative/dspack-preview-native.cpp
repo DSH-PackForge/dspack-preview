@@ -151,7 +151,20 @@ void LoadAndParseBuf(const BYTE* data, size_t size, PreviewData& d)
     // 1) 容器标记 dspack.json（pack-structure v2/v3）：判定身份 + 版本。
     std::vector<BYTE> cj;
     ContainerInfo ci;
-    if (ReadZipEntry(zip, zipSize, "dspack.json", cj))
+    const auto marker = ReadZipEntry(zip, zipSize, "dspack.json", cj);
+    if (marker == ZipReadStatus::TooLarge)
+    {
+        d.valid = false;
+        d.error = L"dspack.json 解压后超过 64 MiB 预览上限";
+        return;
+    }
+    if (marker == ZipReadStatus::Invalid)
+    {
+        d.valid = false;
+        d.error = L"dspack.json 读取失败";
+        return;
+    }
+    if (marker == ZipReadStatus::Ok)
     {
         if (!ParseContainerJson(cj.data(), cj.size(), ci) || !ci.valid)
         {
@@ -179,17 +192,10 @@ void LoadAndParseBuf(const BYTE* data, size_t size, PreviewData& d)
     }
 
     // 2) manifest.json
-    std::vector<BYTE> entry;
-    if (!ReadZipEntry(zip, zipSize, "manifest.json", entry))
+    if (!ReadPackManifest(zip, zipSize, d.info))
     {
         d.valid = false;
-        d.error = L"压缩包中缺少 manifest.json";
-        return;
-    }
-    if (!ParseManifest(entry.data(), entry.size(), d.info))
-    {
-        d.valid = false;
-        d.error = L"manifest.json 解析失败";
+        d.error = d.info.error;
         return;
     }
     if ((d.containerVersion == 4) != (d.info.manifestVersion == 6))
@@ -207,7 +213,7 @@ void LoadAndParse(const wchar_t* path, PreviewData& d)
         0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
     if (h == INVALID_HANDLE_VALUE) { d.valid = false; d.error = L"无法打开文件"; return; }
     DWORD size = GetFileSize(h, 0);
-    if (size < 8 || size > (64u << 20)) { CloseHandle(h); d.valid = false; d.error = L"文件大小异常"; return; }
+    if (size < 8 || size > kPreviewByteLimit) { CloseHandle(h); d.valid = false; d.error = L"文件大小异常"; return; }
     std::vector<BYTE> buf(size);
     DWORD rd = 0;
     BOOL ok = ReadFile(h, buf.data(), size, &rd, 0) != 0;
@@ -224,7 +230,7 @@ bool ReadStreamToVec(IStream* s, std::vector<BYTE>& out)
     STATSTG st; ZeroMemory(&st, sizeof(st));
     if (FAILED(s->Stat(&st, STATFLAG_NONAME))) return false;
     ULONGLONG sz = st.cbSize.QuadPart;
-    if (sz > (64ull << 20)) sz = (64ull << 20); // cap at 64MB
+    if (sz > kPreviewByteLimit) { sz = kPreviewByteLimit; }
     out.resize((size_t)sz);
     ULONG got = 0;
     if (FAILED(s->Read(out.data(), (ULONG)out.size(), &got))) { out.clear(); return false; }

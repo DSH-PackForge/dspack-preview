@@ -56,6 +56,10 @@ parse-smoke.exe test\whale-studio-1.0.0.dspack     :: dshhome 形态（容器 v3
 powershell -File test\make-test-pack.ps1 -Fixture fixtures-v6 -OutFile preview-v6.dspack
 src\DspackPreviewNative\parse-smoke.exe test\preview-v6.dspack
 
+:: 移除可选展示摘要后，技能卡仍应统计归档内 skill.json 的一个条目
+powershell -File test\make-test-pack.ps1 -Fixture fixtures-v6 -OutFile preview-v6-no-summary.dspack -WithoutResourceSummary
+src\DspackPreviewNative\parse-smoke.exe test\preview-v6-no-summary.dspack --without-resource-summary
+
 :: 生成 dshhome 测试包（PowerShell）
 powershell -NoProfile -ExecutionPolicy Bypass -File test\make-dshhome-pack.ps1
 
