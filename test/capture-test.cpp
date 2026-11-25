@@ -17,7 +17,7 @@ static HWND MakeHost(int w, int h)
     wc.lpfnWndProc = DefWindowProcW;
     wc.lpszClassName = L"CaptureTestHost";
     RegisterClassExW(&wc);
-    return CreateWindowExW(0, L"CaptureTestHost", L"", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+    return CreateWindowExW(0, L"CaptureTestHost", L"", WS_OVERLAPPEDWINDOW,
         -2000, -2000, w, h, NULL, NULL, GetModuleHandleW(NULL), NULL);
 }
 

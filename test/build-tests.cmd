@@ -1,6 +1,8 @@
 @echo off
 setlocal
-call "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
+for /f "usebackq tokens=*" %%V in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VCINSTALL=%%V"
+if not defined VCINSTALL (echo Visual Studio C++ tools not found & exit /b 1)
+call "%VCINSTALL%\VC\Auxiliary\Build\vcvarsall.bat" x64
 if errorlevel 1 (echo vcvarsall failed & exit /b 1)
 cd /d "%~dp0"
 

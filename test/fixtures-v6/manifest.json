@@ -1,0 +1,19 @@
+{
+  "manifestVersion": 6,
+  "type": "dshhome",
+  "name": "example",
+  "version": "1.0.0",
+  "displayName": "写作工作台",
+  "description": "包含写作插件和一项保存在归档内的写作技能。",
+  "defaultProfile": "work",
+  "profiles": {
+    "work": {
+      "bundles": ["example-plugin"],
+      "dependencies": {"example-plugin": "1.0.0"},
+      "plugins": {"example-plugin": {"name": {"en": "Example", "zh": "示例"}, "desc": "示例插件"}}
+    }
+  },
+  "resources": {
+    "skill.json": [{"id":"writing","scope":"home","name":"写作"}]
+  }
+}

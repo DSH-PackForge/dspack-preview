@@ -11,6 +11,7 @@
 #include <new>
 #include <wchar.h>
 #include <cstring>
+#include <algorithm>
 #include <string>
 #include <vector>
 #include <cstdarg>
@@ -119,7 +120,7 @@ struct PreviewData
 {
     bool valid = false;
     uint32_t headerVersion = 0;   // 旧 8 字节 DSPK 魔数头里的版本（兼容用）
-    int containerVersion = 0;     // dspack.json 的 version（2/3；旧魔数头=1）
+    int containerVersion = 0;     // dspack.json 的 version（2 至 4；旧魔数头=1）
     ManifestInfo info;
     std::wstring error;
     RECT btnCatalog = { 0, 0, 0, 0 };
@@ -150,7 +151,20 @@ void LoadAndParseBuf(const BYTE* data, size_t size, PreviewData& d)
     // 1) 容器标记 dspack.json（pack-structure v2/v3）：判定身份 + 版本。
     std::vector<BYTE> cj;
     ContainerInfo ci;
-    if (ReadZipEntry(zip, zipSize, "dspack.json", cj))
+    const auto marker = ReadZipEntry(zip, zipSize, "dspack.json", cj);
+    if (marker == ZipReadStatus::TooLarge)
+    {
+        d.valid = false;
+        d.error = L"dspack.json 解压后超过 64 MiB 预览上限";
+        return;
+    }
+    if (marker == ZipReadStatus::Invalid)
+    {
+        d.valid = false;
+        d.error = L"dspack.json 读取失败";
+        return;
+    }
+    if (marker == ZipReadStatus::Ok)
     {
         if (!ParseContainerJson(cj.data(), cj.size(), ci) || !ci.valid)
         {
@@ -158,10 +172,10 @@ void LoadAndParseBuf(const BYTE* data, size_t size, PreviewData& d)
             d.error = L"dspack.json 无效（format 应为 \"dspack\"）";
             return;
         }
-        if (ci.version < 2 || ci.version > 3)
+        if (ci.version < 2 || ci.version > 4)
         {
             d.valid = false;
-            d.error = L"不支持的 .dspack 容器版本（支持 v2 / v3）";
+            d.error = L"不支持的 .dspack 容器版本（支持 v2 / v3 / v4）";
             return;
         }
         d.containerVersion = ci.version;
@@ -178,17 +192,16 @@ void LoadAndParseBuf(const BYTE* data, size_t size, PreviewData& d)
     }
 
     // 2) manifest.json
-    std::vector<BYTE> entry;
-    if (!ReadZipEntry(zip, zipSize, "manifest.json", entry))
+    if (!ReadPackManifest(zip, zipSize, d.info))
     {
         d.valid = false;
-        d.error = L"压缩包中缺少 manifest.json";
+        d.error = d.info.error;
         return;
     }
-    if (!ParseManifest(entry.data(), entry.size(), d.info))
+    if ((d.containerVersion == 4) != (d.info.manifestVersion == 6))
     {
         d.valid = false;
-        d.error = L"manifest.json 解析失败";
+        d.error = L"容器 v4 必须搭配清单 v6";
         return;
     }
     d.valid = true;
@@ -200,7 +213,7 @@ void LoadAndParse(const wchar_t* path, PreviewData& d)
         0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
     if (h == INVALID_HANDLE_VALUE) { d.valid = false; d.error = L"无法打开文件"; return; }
     DWORD size = GetFileSize(h, 0);
-    if (size < 8 || size > (64u << 20)) { CloseHandle(h); d.valid = false; d.error = L"文件大小异常"; return; }
+    if (size < 8 || size > kPreviewByteLimit) { CloseHandle(h); d.valid = false; d.error = L"文件大小异常"; return; }
     std::vector<BYTE> buf(size);
     DWORD rd = 0;
     BOOL ok = ReadFile(h, buf.data(), size, &rd, 0) != 0;
@@ -217,7 +230,7 @@ bool ReadStreamToVec(IStream* s, std::vector<BYTE>& out)
     STATSTG st; ZeroMemory(&st, sizeof(st));
     if (FAILED(s->Stat(&st, STATFLAG_NONAME))) return false;
     ULONGLONG sz = st.cbSize.QuadPart;
-    if (sz > (64ull << 20)) sz = (64ull << 20); // cap at 64MB
+    if (sz > kPreviewByteLimit) { sz = kPreviewByteLimit; }
     out.resize((size_t)sz);
     ULONG got = 0;
     if (FAILED(s->Read(out.data(), (ULONG)out.size(), &got))) { out.clear(); return false; }
@@ -613,7 +626,16 @@ void RenderPreview(HDC hdc, const RECT& rc, PreviewData& d)
         descH = fullH < maxH ? fullH : maxH;
     }
 
+    float lblW = (float)UiPx(96, sc);
+    const float detailWidth = std::max(1.0f, cw - lblW - UiPx(10, sc));
+    std::vector<int> detailHeights;
     int metaH = 4 * bodyLh + 3 * rowGap;
+    for (const auto& row : mf.details)
+    {
+        const int h = std::max(bodyLh, MeasureHeightF(g, row.second, fBody, (int)detailWidth));
+        detailHeights.push_back(h);
+        metaH += h + rowGap;
+    }
 
     float bodyH = statH
         + sectGap + sectLh + UiPx(12, sc)
@@ -729,7 +751,6 @@ void RenderPreview(HDC hdc, const RECT& rc, PreviewData& d)
     }
 
     // 元数据行
-    float lblW = (float)UiPx(96, sc);
     const wchar_t* rk[4]; std::wstring rv[4];
     rk[0] = L"标识"; rv[0] = mf.name;
     rk[1] = L"类型"; rv[1] = typeLabel;
@@ -743,6 +764,17 @@ void RenderPreview(HDC hdc, const RECT& rc, PreviewData& d)
         Gdiplus::RectF vr(bx + lblW + UiPx(10, sc), y, cw - lblW - UiPx(10, sc), (float)bodyLh);
         DrawTextF(g, rv[i], fBody, P.text, vr, false, true, false);
         y += bodyLh + rowGap;
+    }
+
+    for (size_t index = 0; index < mf.details.size(); ++index)
+    {
+        const auto& row = mf.details[index];
+        const float h = (float)detailHeights[index];
+        Gdiplus::RectF label(bx, y, lblW, (float)bodyLh);
+        DrawTextF(g, row.first, fChip, P.sub, label, false, true, false);
+        Gdiplus::RectF value(bx + lblW + UiPx(10, sc), y, detailWidth, h);
+        DrawTextF(g, row.second, fBody, P.text, value, false, false, true);
+        y += h + rowGap;
     }
 
     // 卡片描边（最上层，保持清晰）

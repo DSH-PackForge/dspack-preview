@@ -1,4 +1,4 @@
-LIBRARY "dspack-preview-native"
+LIBRARY "DspackPreviewNative"
 EXPORTS
     DllGetClassObject PRIVATE
     DllCanUnloadNow PRIVATE

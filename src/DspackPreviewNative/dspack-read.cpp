@@ -3,22 +3,28 @@
 #include "third_party/miniz/miniz.h"
 #include <cstring>
 #include <cmath>
+#include <memory>
 
 // ---------- ZIP reader (miniz; supports stored + deflate + zip64) ----------
-bool ReadZipEntry(const void* zip, size_t zipSize, const char* name, std::vector<BYTE>& out)
+ZipReadStatus ReadZipEntry(const void* zip, size_t zipSize, const char* name, std::vector<BYTE>& out)
 {
-    mz_zip_archive arc;
-    memset(&arc, 0, sizeof(arc));
-    if (!mz_zip_reader_init_mem(&arc, zip, zipSize, 0)) return false;
-
-    size_t outSize = 0;
-    void* p = mz_zip_reader_extract_file_to_heap(&arc, name, &outSize, 0);
-    mz_zip_reader_end(&arc);
-    if (!p) return false;
-
-    out.assign((const BYTE*)p, (const BYTE*)p + outSize);
-    mz_free(p);
-    return true;
+    out.clear();
+    mz_zip_archive arc = {};
+    if (!mz_zip_reader_init_mem(&arc, zip, zipSize, 0)) { return ZipReadStatus::Invalid; }
+    const std::unique_ptr<mz_zip_archive, decltype(&mz_zip_reader_end)> reader(&arc, mz_zip_reader_end);
+    const int index = mz_zip_reader_locate_file(&arc, name, nullptr, 0);
+    if (index < 0) { return ZipReadStatus::Missing; }
+    mz_zip_archive_file_stat entry = {};
+    if (!mz_zip_reader_file_stat(&arc, index, &entry) || !entry.m_uncomp_size) { return ZipReadStatus::Invalid; }
+    if (entry.m_uncomp_size > kPreviewByteLimit) { return ZipReadStatus::TooLarge; }
+    try { out.resize(static_cast<size_t>(entry.m_uncomp_size)); }
+    catch (const std::bad_alloc&) { return ZipReadStatus::Invalid; }
+    if (!mz_zip_reader_extract_to_mem(&arc, index, out.data(), out.size(), 0))
+    {
+        out.clear();
+        return ZipReadStatus::Invalid;
+    }
+    return ZipReadStatus::Ok;
 }
 
 // ---------- minimal JSON parser (UTF-8 in -> UTF-16 out) ----------
@@ -207,14 +213,33 @@ bool AsNumber(const JNode* n, int& out)
 }
 
 // pickLang: en-US -> zh-CN -> first
-bool GetLocalized(const JNode& o, const wchar_t* key, std::wstring& out)
+bool GetLocalized(const JNode& o, const wchar_t* key, std::wstring& out, bool systemLanguage = false)
 {
     const JNode* n = Get(o, key);
     if (!n) return false;
     if (n->t == JNode::Str) { out = n->str; return true; }
     if (n->t == JNode::Obj)
     {
+        if (systemLanguage)
+        {
+            wchar_t locale[LOCALE_NAME_MAX_LENGTH] = {};
+            if (GetUserDefaultLocaleName(locale, LOCALE_NAME_MAX_LENGTH))
+            {
+                const std::wstring language(locale);
+                const std::wstring base = language.substr(0, language.find(L'-'));
+                for (const auto& pair : n->obj)
+                {
+                    if (!_wcsicmp(pair.first.c_str(), locale) && AsString(&pair.second, out)) { return true; }
+                }
+                for (const auto& pair : n->obj)
+                {
+                    const std::wstring tag = pair.first.substr(0, pair.first.find(L'-'));
+                    if (!_wcsicmp(tag.c_str(), base.c_str()) && AsString(&pair.second, out)) { return true; }
+                }
+            }
+        }
         if (AsString(Get(*n, L"en-US"), out)) return true;
+        if (AsString(Get(*n, L"en"), out)) return true;
         if (AsString(Get(*n, L"zh-CN"), out)) return true;
         if (!n->obj.empty()) return AsString(&n->obj[0].second, out);
     }
@@ -226,6 +251,36 @@ int Count(const JNode& o, const wchar_t* key, JNode::T want)
     const JNode* n = Get(o, key);
     if (!n || n->t != want) return 0;
     return (int)(want == JNode::Arr ? n->arr.size() : n->obj.size());
+}
+
+void AddDetail(ManifestInfo& info, const wchar_t* label, const JNode& item,
+               const std::wstring& id, const std::wstring& scope)
+{
+    std::wstring name, desc, ref, commit, plugin;
+    GetLocalized(item, L"name", name, true);
+    GetLocalized(item, L"desc", desc, true);
+    AsString(Get(item, L"plugin"), plugin);
+    AsString(Get(item, L"ref"), ref);
+    AsString(Get(item, L"commit"), commit);
+    std::wstring text = name.empty() ? id : name;
+    if (!name.empty() && name != id) { text += L" (" + id + L")"; }
+    for (const auto& field : {scope, plugin, ref, commit, desc})
+    {
+        if (!field.empty()) { text += L" · " + field; }
+    }
+    info.details.emplace_back(label, text);
+}
+
+void AddPlugins(ManifestInfo& info, const JNode& unit, const std::wstring& scope)
+{
+    const JNode* plugins = Get(unit, L"plugins");
+    if (plugins && plugins->t == JNode::Obj)
+    {
+        for (const auto& plugin : plugins->obj)
+        {
+            AddDetail(info, L"插件", plugin.second, plugin.first, scope);
+        }
+    }
 }
 } // namespace
 
@@ -272,5 +327,74 @@ bool ParseManifest(const BYTE* data, size_t len, ManifestInfo& info)
     info.profiles = Count(root, L"profiles", JNode::Obj);
     info.presets = Count(root, L"presets", JNode::Obj);
     info.skills = Count(root, L"skills", JNode::Arr);
+    info.details.clear();
+    if (info.manifestVersion == 6)
+    {
+        const JNode* profiles = Get(root, L"profiles");
+        if (info.type == L"dshhome" && profiles && profiles->t == JNode::Obj)
+        {
+            for (const auto& unit : profiles->obj) { AddPlugins(info, unit.second, unit.first); }
+        }
+        else { AddPlugins(info, root, L""); }
+        const JNode* resources = Get(root, L"resources");
+        if (resources && resources->t == JNode::Obj)
+        {
+            const wchar_t* groups[][2] = {{L"path.json", L"插件数据"}, {L"provider.json", L"模型服务商"},
+                                          {L"mcp.json", L"MCP 服务"}, {L"skill.json", L"技能"}};
+            for (const auto& group : groups)
+            {
+                const JNode* rows = Get(*resources, group[0]);
+                if (!rows || rows->t != JNode::Arr) { continue; }
+                for (const auto& row : rows->arr)
+                {
+                    std::wstring id, scope;
+                    if (!AsString(Get(row, L"id"), id)) { continue; }
+                    AsString(Get(row, L"scope"), scope);
+                    AddDetail(info, group[1], row, id, scope);
+                }
+            }
+        }
+    }
     return true;
+}
+
+bool ReadPackManifest(const void* zip, size_t zipSize, ManifestInfo& info)
+{
+    std::vector<BYTE> entry;
+    const auto manifest = ReadZipEntry(zip, zipSize, "manifest.json", entry);
+    if (manifest == ZipReadStatus::TooLarge)
+    {
+        info.error = L"manifest.json 解压后超过 64 MiB 预览上限";
+        return false;
+    }
+    if (manifest != ZipReadStatus::Ok || !ParseManifest(entry.data(), entry.size(), info))
+    {
+        info.error = L"manifest.json 缺失或解析失败";
+        return false;
+    }
+    if (info.manifestVersion != 6) { return true; }
+    info.skills = 0;
+    const auto skills = ReadZipEntry(zip, zipSize, "skill.json", entry);
+    if (skills == ZipReadStatus::Missing) { return true; }
+    if (skills == ZipReadStatus::TooLarge)
+    {
+        info.error = L"skill.json 解压后超过 64 MiB 预览上限";
+        return false;
+    }
+    if (skills == ZipReadStatus::Ok)
+    {
+        Parser parser(entry.data(), entry.size());
+        JNode root;
+        if (parser.value(root))
+        {
+            const JNode* items = Get(root, L"items");
+            if (items && items->t == JNode::Arr)
+            {
+                info.skills = (int)items->arr.size();
+                return true;
+            }
+        }
+    }
+    info.error = L"skill.json 解析失败";
+    return false;
 }

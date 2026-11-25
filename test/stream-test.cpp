@@ -47,7 +47,7 @@ int wmain(int argc, wchar_t** argv)
     wc.lpfnWndProc = DefWindowProcW;
     wc.lpszClassName = L"StreamTestHost";
     RegisterClassExW(&wc);
-    HWND host = CreateWindowExW(0, L"StreamTestHost", L"", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+    HWND host = CreateWindowExW(0, L"StreamTestHost", L"", WS_OVERLAPPEDWINDOW,
         -2000, -2000, 520, 420, NULL, NULL, GetModuleHandleW(NULL), NULL);
 
     RECT r = { 0, 0, 500, 400 };
